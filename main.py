@@ -24,7 +24,7 @@ SCOPES = [
 ]
 
 # Ganti dengan ID Google Spreadsheet Anda
-SPREADSHEET_ID = "19L0KR-wj5NgJTPu5CPOkJRHlnLeSct_ZM28xiIH07vY"
+SPREADSHEET_ID = "1FbPrmPU7yslM9nHpzx0mEAMLO4_-MM7V-FPJespPyF4"
 
 def get_sheet(sheet_name: str):
     try:
