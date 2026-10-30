@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Sistem Presensi & Operasional Logistik</title>
+  
+  <!-- CDNs (CSS) -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  
+  <!-- 1. DIGANTI: Panggil file CSS terpisah (atau gunakan tag <style> jika digabung) -->
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body onload="checkSession()">
+<div class="container-fluid px-2 px-md-4 py-3">
+
+  <!-- 1. LOGIN VIEW -->
+  <div id="loginView" class="row justify-content-center py-4 py-md-5">
+    <div class="col-12 col-sm-10 col-md-6 col-lg-4">
+      <div class="card card-custom p-3 p-md-4 text-center">
+        <img id="loginAppLogo" src="https://lh3.googleusercontent.com/d/1SpdXrQwxU7qogqZJ7TpQ3ylP_zWVeRh9" class="mx-auto mb-3 d-block img-fluid" style="max-height: 80px; max-width: 100%; width: auto; object-fit: contain;">
+        <h4 id="loginAppName" class="fw-bold text-primary">e - Absensi</h4>
+        <p id="loginAppDesc" class="text-muted small">Presensi Geolocation berbasis Google AppScript</p>
+        
+        <form onsubmit="handleLogin(event)" class="text-start mt-3">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Username</label>
+            <input type="text" id="loginUsername" class="form-control" required placeholder="Masukkan username">
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Password</label>
+            <input type="password" id="loginPassword" class="form-control" required placeholder="Masukkan password">
+          </div>
+          <button type="submit" id="btnLogin" class="btn btn-primary w-100 fw-bold py-2">Masuk Sistem</button>
+        </form>
+
+        <div class="mt-4 pt-3 border-top">
+          <button class="btn btn-sm btn-outline-secondary w-100" onclick="showRegisterModal()">Pendaftaran Karyawan Baru</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. DASHBOARD MAIN VIEW -->
+  <div id="dashboardView" class="d-none">
+
+    <!-- HEADER UTAMA TERPADU (NAVBAR + USER + ESTIMASI GAJI) -->
+    <div class="card border-0 shadow-sm rounded-3 p-3 mb-3 bg-white">
+      <div class="d-flex justify-content-between align-items-center mb-3 pb-2 border-bottom flex-wrap gap-2">
+        <div class="d-flex align-items-center gap-2">
+          <img id="dashAppLogo" src="" class="app-logo" style="max-width: 160px; max-height: 40px; width: auto; height: auto; object-fit: contain;">
+          <div>
+            <h5 id="dashAppName" class="fw-bold mb-0 text-primary fs-6"></h5>
+            <span id="roleBadge" class="badge bg-secondary"></span>
+          </div>
+        </div>
+        <button class="btn btn-outline-danger btn-sm fw-bold ms-auto" onclick="handleLogout()">
+          <i class="bi bi-box-arrow-right"></i> Keluar
+        </button>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <div>
+          <h5 id="userWelcome" class="fw-bold mb-1 text-dark fs-6 fs-md-5"></h5>
+          <small id="periodeGajiText" class="text-muted d-block"></small>
+        </div>
+
+        <div id="cardEstimasiGaji" class="bg-light p-2 px-3 border rounded w-100-mobile text-end">
+          <span class="d-block text-muted small mb-1">Estimasi Gaji Minggu Ini</span>
+          <button type="button" class="btn btn-sm btn-outline-primary fw-bold w-100-mobile" onclick="showModalEstimasiGaji()">
+            <i class="bi bi-eye"></i> Cek Estimasi Gaji
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- BANNER PERINGATAN -->
+    <div id="bannerPeringatanPresensi" class="alert alert-warning border-0 shadow-sm mb-3 d-none">
+      <div class="d-flex align-items-start">
+        <div class="fs-3 me-3" id="iconPeringatanPresensi">⚠️</div>
+        <div class="w-100">
+          <h6 class="fw-bold mb-1" id="titlePeringatanPresensi">Pemberitahuan Presensi Hari Ini</h6>
+          <div id="textPeringatanPresensi" class="small"></div>
+          <div id="announcementBoxInBanner" class="mt-2 pt-2 border-top border-warning-subtle text-dark fw-medium small d-none">
+            <strong>📢 Pengumuman Sistem:</strong> <span id="announcementText"></span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- KOTAK PERMINTAAN TUKAR LIBUR MASUK -->
+    <div id="cardPermintaanTukarLibur" class="card card-custom p-3 mb-3 border-warning w-100 d-none">
+      <div class="d-flex align-items-center justify-content-between mb-2">
+        <h6 class="fw-bold mb-0 text-warning-emphasis">
+          <i class="bi bi-arrow-left-right"></i> Permintaan Tukar Libur Masuk
+        </h6>
+        <span id="badgeNotifTukarKaryawan" class="badge bg-danger">0 Permintaan</span>
+      </div>
+      <p class="small text-muted mb-2">Rekan kerja Anda mengajukan pertukaran hari libur. Silakan konfirmasi persetujuan Anda:</p>
+      <div id="listPermintaanTukarKaryawan"></div>
+    </div>
+
+    <!-- MODAL POP-UP ESTIMASI GAJI -->
+    <div class="modal fade" id="modalEstimasiGaji" tabindex="-1" aria-hidden="true">
+      <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content border-0 shadow">
+          <div class="modal-header bg-primary text-white">
+            <h6 class="modal-title fw-bold">
+              <i class="bi bi-wallet2"></i> Detail Estimasi Gaji Minggu Ini
+            </h6>
+            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body">
+            <div class="text-center py-2 bg-light rounded border mb-3">
+              <small class="text-muted d-block mb-1">Perkiraan Pendapatan Clean (Diterima)</small>
+              <h3 id="nominalGajiMingguIni" class="fw-bold text-success mb-0">Rp 0</h3>
+            </div>
+            <div class="p-2 border rounded bg-white small">
+              <div class="d-flex justify-content-between py-1 border-bottom">
+                <span class="text-muted">Periode Gaji:</span>
+                <strong id="modalGajiPeriodeText">-</strong>
+              </div>
+              <div class="d-flex justify-content-between py-1 border-bottom">
+                <span class="text-muted">Lain-lain:</span>
+                <strong id="modalGajiLainLainText" class="text-success">Rp 0</strong>
+              </div>
+              <div class="d-flex justify-content-between py-1">
+                <span class="text-muted">Potongan Kasbon:</span>
+                <strong id="infoKehadiranGaji" class="text-danger">Rp 0</strong>
+              </div>
+            </div>
+            <div class="mt-3">
+              <small class="fw-bold text-secondary d-block mb-2">Rincian Presensi Saat Ini:</small>
+              <div id="badgeKehadiranMingguIniModal" class="d-flex flex-wrap gap-2"></div>
+            </div>
+          </div>
+          <div class="modal-footer bg-light p-2">
+            <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Tutup</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- NAVIGATION TABS -->
+    <ul class="nav nav-pills mb-3 gap-2 bg-white p-2 rounded-3 shadow-sm flex-nowrap overflow-x-auto" id="mainTab" role="tablist">
+      <li class="nav-item">
+        <button class="nav-link active fw-bold text-nowrap" id="tab-presensi-nav" data-bs-toggle="tab" data-bs-target="#content-presensi">📍 Presensi Saya</button>
+      </li>
+      <li class="nav-item tab-role-histori-admin d-none">
+        <button class="nav-link fw-bold text-nowrap" id="tab-histori-nav" data-bs-toggle="tab" data-bs-target="#content-histori">📋 Histori Presensi Karyawan</button>
+      </li>
+      <li class="nav-item">
+        <button class="nav-link fw-bold text-nowrap" id="tab-jadwal-nav" data-bs-toggle="tab" data-bs-target="#content-jadwal">🚛 Operasional</button>
+      </li>
+      <li class="nav-item tab-role-payroll d-none">
+        <button class="nav-link fw-bold text-nowrap" id="tab-payroll-nav" data-bs-toggle="tab" data-bs-target="#content-payroll">💰 Payroll & Kasbon</button>
+      </li>
+      <li class="nav-item tab-role-karyawan d-none">
+        <button class="nav-link fw-bold text-nowrap" id="tab-karyawan-nav" data-bs-toggle="tab" data-bs-target="#content-karyawan">👥 Karyawan</button>
+      </li>
+      <li class="nav-item" id="tab-pengaturan">
+        <button class="nav-link fw-bold text-nowrap" id="tab-pengaturan-nav" data-bs-toggle="tab" data-bs-target="#content-pengaturan">⚙️ Pengaturan</button>
+      </li>
+      <li class="nav-item tab-role-acc d-none" role="presentation">
+        <button class="nav-link text-nowrap" id="acc-tab" data-bs-toggle="tab" data-bs-target="#content-libur" type="button" role="tab">
+          <i class="bi bi-check2-square"></i> ACC / Persetujuan
+        </button>
+      </li>
+    </ul>
+
+    <!-- TAB CONTENTS -->
+    <div class="tab-content" id="mainTabContent">
+
+      <!-- 1. PRESENSI SAYA -->
+      <div class="tab-pane fade show active" id="content-presensi">
+        <div class="row g-3 mb-4">
+          <div class="col-12 col-lg-6">
+            <div class="card card-custom p-3 p-md-4 h-100">
+              <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">📌 Presensi Masuk / Keluar</h5>
+              <div id="map" class="mb-3"></div>
+              
+              <div id="statusDoneAlert" class="alert alert-success d-none mb-3">✔ Anda telah menyelesaikan presensi Check-In & Check-Out hari ini.</div>
+              <div id="statusLiburAlert" class="alert alert-info d-none mb-3">ℹ Hari ini jadwal libur rutin Anda. Presensi bersifat opsional.</div>
+              <div id="statusIzinAlert" class="alert alert-warning d-none mb-3">⚠️ Status Anda sedang Izin/Cuti. Tombol presensi dinonaktifkan.</div>
+              
+              <div class="d-flex flex-column flex-sm-row gap-2">
+                <button id="btnCheckIn" class="btn btn-success w-100 fw-bold py-2" onclick="kirimPresensi('IN')">Check-In Masuk</button>
+                <button id="btnCheckOut" class="btn btn-danger w-100 fw-bold py-2 d-none" onclick="handleCheckOutClick()">Check-Out Keluar</button>
+              </div>
+
+              <div class="mt-3 text-center d-flex justify-content-center flex-wrap gap-2">
+                <button class="btn btn-sm btn-link text-decoration-none" onclick="showTukarLiburModal()">🔄 Ajukan Tukar Libur</button>
+                <button class="btn btn-sm btn-link text-decoration-none" onclick="showIzinModal()">📝 Ajukan Izin/Cuti</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-lg-6">
+            <div id="cardJadwalHariIni" class="card card-custom p-3 p-md-4 mb-3 border-start border-4 border-primary d-none">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="fw-bold mb-0 text-primary" id="badgePeranJadwal">Jadwal Distribusi Hari Ini</h6>
+                <span class="badge bg-primary" id="titleAreaJadwal"></span>
+              </div>
+              <p class="mb-1 small" id="detailJadwalTim"></p>
+              <p class="mb-0 small fw-bold text-secondary" id="detailJadwalNopol"></p>
+            </div>
+
+            <div class="card card-custom p-3 p-md-4">
+              <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">📋 Histori Presensi Saya</h5>
+              <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                  <thead class="table-dark">
+                    <tr>
+                      <th>Tanggal</th>
+                      <th>Masuk</th>
+                      <th>Keluar</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tabelRiwayatAbsenSaya"></tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1B. TAB HISTORI PRESENSI KARYAWAN -->
+      <div class="tab-pane fade" id="content-histori">
+        <div class="card card-custom p-3 p-md-4">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">📋 Rekap Histori Presensi Seluruh Karyawan</h5>
+          <div class="row g-2 mb-3">
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Dari Tanggal</label>
+              <input type="date" id="filterHistoriStart" class="form-control form-control-sm">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Sampai Tanggal</label>
+              <input type="date" id="filterHistoriEnd" class="form-control form-control-sm">
+            </div>
+            <div class="col-12 col-md-4">
+              <label class="form-label small fw-bold">Cari Karyawan</label>
+              <input type="text" id="filterHistoriSearch" class="form-control form-control-sm" placeholder="Nama / ID Karyawan...">
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end gap-1 mt-2 mt-md-0">
+              <button class="btn btn-sm btn-primary fw-bold w-100" onclick="filterHistoriAbsen()">Filter</button>
+              <button class="btn btn-sm btn-outline-secondary w-100" onclick="resetFilterHistori()">Reset</button>
+            </div>
+          </div>
+          <div class="mb-3 d-flex justify-content-end gap-2 flex-wrap">
+            <button class="btn btn-sm btn-outline-danger fw-bold w-100-mobile" onclick="exportPresensiPDF()">
+              🖨️ Cetak / Save PDF
+            </button>
+            <button class="btn btn-sm btn-outline-success fw-bold w-100-mobile" onclick="exportPresensiCSV()">
+              📊 Export CSV Laporan
+            </button>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>Karyawan</th>
+                  <th>Tanggal</th>
+                  <th>Masuk</th>
+                  <th>Keluar</th>
+                  <th>Status Radius</th>
+                  <th class="text-center">Kerja Pagi</th>
+                  <th class="text-center">Uang Makan</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="tabelRiwayatAbsenAll"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- MODAL EDIT / KOREKSI PRESENSI ADMIN -->
+      <div class="modal fade" id="modalEditPresensi" tabindex="-1" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+          <div class="modal-content border-0 shadow">
+            <div class="modal-header bg-warning text-dark">
+              <h6 class="modal-title fw-bold"><i class="bi bi-pencil-square"></i> Koreksi & Penandaan Presensi</h6>
+              <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <form id="formKoreksiPresensi" onsubmit="simpanKoreksiPresensi(event)">
+              <div class="modal-body small">
+                <input type="hidden" id="editPresensiId">
+
+                <div class="row g-2 mb-2">
+                  <div class="col-12 col-sm-6">
+                    <label class="form-label fw-semibold mb-1">Nama Karyawan</label>
+                    <input type="text" id="editPresensiNama" class="form-control form-control-sm bg-light" readonly>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <label class="form-label fw-semibold mb-1">Tanggal</label>
+                    <input type="date" id="editPresensiTanggal" class="form-control form-control-sm bg-light" readonly>
+                  </div>
+                </div>
+
+                <div class="row g-2 mb-2">
+                  <div class="col-12 col-sm-6">
+                    <label class="form-label fw-semibold mb-1">Jam Masuk</label>
+                    <input type="time" id="editPresensiJamMasuk" class="form-control form-control-sm" step="1" required>
+                  </div>
+                  <div class="col-12 col-sm-6">
+                    <label class="form-label fw-semibold mb-1">Jam Keluar</label>
+                    <input type="time" id="editPresensiJamKeluar" class="form-control form-control-sm" step="1">
+                  </div>
+                </div>
+
+                <div class="p-2 bg-light rounded border my-3">
+                  <label class="fw-bold text-dark d-block mb-2"><i class="bi bi-check2-square"></i> Penandaan Insentif Admin:</label>
+                  <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="editPresensiDapatKerjaPagi">
+                    <label class="form-check-label fw-semibold" for="editPresensiDapatKerjaPagi">Dapat Insentif Kerja Pagi</label>
+                  </div>
+                  <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="editPresensiDapatUangMakan">
+                    <label class="form-check-label fw-semibold" for="editPresensiDapatUangMakan">Dapat Uang Makan</label>
+                  </div>
+                </div>
+
+                <div class="mb-2">
+                  <label class="form-label fw-semibold mb-1">Catatan Koreksi</label>
+                  <textarea id="editPresensiCatatan" class="form-control form-control-sm" rows="2"></textarea>
+                </div>
+              </div>
+
+              <div class="modal-footer bg-light p-2">
+                <button type="button" class="btn btn-sm btn-secondary" data-bs-dismiss="modal">Batal</button>
+                <button type="submit" id="btnSimpanKoreksi" class="btn btn-sm btn-warning fw-bold">Simpan Koreksi</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. OPERASIONAL & PENJADWALAN VIEW -->
+      <div class="tab-pane fade" id="content-jadwal">
+        <div class="card card-custom p-3 p-md-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="fw-bold mb-0 text-primary fs-6 fs-md-5">🚛 Penjadwalan Operasional Distribusi</h5>
+            <div class="role-admin-cabang role-admin d-flex gap-2 w-100-mobile">
+              <button class="btn btn-primary btn-sm fw-bold w-100-mobile" onclick="showModalTambahJadwal()">+ Buat Jadwal Mingguan</button>
+              <button class="btn btn-outline-primary btn-sm fw-bold w-100-mobile" onclick="showModalTambahArea()">+ Master Area</button>
+            </div>
+          </div>
+          
+          <div id="containerJadwal"></div>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">📍 Master Area Wilayah Distribusi</h5>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID Area</th>
+                  <th>Nama Wilayah</th>
+                  <th>Cabang</th>
+                  <th>Armada Default</th>
+                </tr>
+              </thead>
+              <tbody id="tabelAreaDistribusi"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. PAYROLL & KASBON VIEW -->
+      <div class="tab-pane fade tab-role-payroll" id="content-payroll">
+        <div class="card card-custom p-3 p-md-4 mb-4">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="fw-bold mb-0 text-success fs-6 fs-md-5">💰 Rekap Payroll Mingguan</h5>
+            <small class="text-muted">*Nilai potongan kasbon & lain-lain dapat disesuaikan langsung di tabel</small>
+          </div>
+          
+          <div class="row g-2 g-md-3 mb-4">
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Tanggal Mulai</label>
+              <input type="date" id="payStart" class="form-control">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Tanggal Selesai</label>
+              <input type="date" id="payEnd" class="form-control">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Filter Cabang</label>
+              <select id="payCabangFilter" class="form-select"></select>
+            </div>
+            <div class="col-12 col-sm-6 col-md-3 d-flex align-items-end mt-2 mt-sm-0">
+              <button class="btn btn-success w-100 fw-bold" onclick="kalkulasiPayroll()">Hitung Rekap Payroll</button>
+            </div>
+          </div>
+
+          <div class="table-responsive mb-3">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>Nama</th>
+                  <th>Posisi</th>
+                  <th>Gaji/Hari</th>
+                  <th>Hadir</th>
+                  <th>Subtotal</th>
+                  <th>Sisa Kasbon</th>
+                  <th>Pot. Cicilan Kasbon</th>
+                  <th>Lain-Lain (+/-)</th>
+                  <th>Total Diterima</th>
+                  <th class="text-center">Aksi / Cetak</th>
+                </tr>
+              </thead>
+              <tbody id="tabelPayroll"></tbody>
+            </table>
+          </div>
+
+          <div id="boxAksiPayroll" class="d-flex justify-content-end gap-2 flex-wrap border-top pt-3 mt-3">
+            <button id="btnSimpanPay" class="btn btn-success fw-bold w-100-mobile" onclick="prosesSimpanPayroll()">
+              ✔ Simpan Payroll & Potong Saldo Kasbon
+            </button>
+          </div>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">💸 Pencatatan Pinjaman / Kasbon Karyawan</h5>
+          <form onsubmit="saveKasbon(event)" id="formKasbon" class="row g-2 g-md-3 mb-4">
+            <div class="col-12 col-md-4">
+              <label class="form-label small fw-bold">Pilih Karyawan</label>
+              <select id="kasbonEmpId" class="form-select" required></select>
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Nominal Pinjaman (Rp)</label>
+              <input type="number" id="kasbonNominal" class="form-control" required placeholder="Contoh: 500000">
+            </div>
+            <div class="col-12 col-sm-6 col-md-3">
+              <label class="form-label small fw-bold">Keterangan / Alasan</label>
+              <input type="text" id="kasbonKet" class="form-control" placeholder="Contoh: Pinjaman darurat" required>
+            </div>
+            <div class="col-12 col-md-2 d-flex align-items-end mt-2 mt-md-0">
+              <button type="submit" class="btn btn-primary w-100 fw-bold">Catat Kasbon</button>
+            </div>
+          </form>
+
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Karyawan</th>
+                  <th>Tanggal</th>
+                  <th>Nominal Awal</th>
+                  <th>Total Cicilan</th>
+                  <th>Sisa Kasbon</th>
+                  <th>Keterangan</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="tabelKasbon"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 4. KARYAWAN VIEW -->
+      <div class="tab-pane fade tab-role-karyawan" id="content-karyawan">
+        <div class="card card-custom p-3 p-md-4">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="fw-bold mb-0 text-primary fs-6 fs-md-5">👥 Manajemen Data Karyawan</h5>
+            <button class="btn btn-primary btn-sm fw-bold role-admin role-hrd w-100-mobile" onclick="new bootstrap.Modal(document.getElementById('modalKaryawan')).show()">+ Karyawan Baru</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Nama Lengkap</th>
+                  <th>Posisi</th>
+                  <th>Cabang</th>
+                  <th>Libur Rutin</th>
+                  <th>Gaji Harian</th>
+                  <th>Username</th>
+                  <th>Status</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="tabelKaryawan"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 5. TAB ACC / PERSETUJUAN VIEW -->
+      <div class="tab-pane fade tab-role-libur" id="content-libur">
+        <div class="card card-custom p-3 p-md-4 mb-4">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5"><i class="bi bi-file-earmark-text"></i> Persetujuan Pengajuan Izin & Cuti</h5>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Karyawan</th>
+                  <th>Mulai s/d Selesai</th>
+                  <th>Jenis</th>
+                  <th>Keterangan</th>
+                  <th>Status</th>
+                  <th class="text-end">Aksi ACC</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyACC_Izin"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5"><i class="bi bi-arrow-left-right"></i> Persetujuan Pengajuan Tukar Libur</h5>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Pemohon & Tgl Libur</th>
+                  <th>Pengganti & Tgl Pengganti</th>
+                  <th>Alasan</th>
+                  <th>Status</th>
+                  <th class="text-end">Aksi ACC</th>
+                </tr>
+              </thead>
+              <tbody id="tbodyACC_Tukar"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <!-- 6. PENGATURAN & MASTER CABANG VIEW -->
+      <div class="tab-pane fade" id="content-pengaturan">
+        <div class="card card-custom p-3 p-md-4 mb-4 shadow-sm border-0">
+          <h5 class="fw-bold mb-3 text-primary fs-6 fs-md-5">⚙️ Pengaturan Aplikasi</h5>
+          <form onsubmit="saveSettings(event)">
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Nama Aplikasi</label>
+              <input type="text" id="setAppName" class="form-control form-control-sm" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small fw-bold">URL Logo Aplikasi</label>
+              <input type="text" id="setAppLogo" class="form-control form-control-sm" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Deskripsi Singkat</label>
+              <input type="text" id="setAppDesc" class="form-control form-control-sm" required>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Pengumuman Portal</label>
+              <textarea id="setAnnounce" class="form-control form-control-sm" rows="2"></textarea>
+            </div>
+            <div class="mb-3">
+              <label class="form-label small fw-bold">Informasi Kontak HRD / Support</label>
+              <input type="text" id="setContact" class="form-control form-control-sm" required>
+            </div>
+            <div class="d-flex flex-column flex-sm-row gap-2">
+              <button type="submit" class="btn btn-primary btn-sm fw-bold">Simpan Pengaturan</button>
+              <button type="button" class="btn btn-outline-danger btn-sm" onclick="runDatabaseSetup()">Reset / Setup Database Sheets</button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4 mb-4 shadow-sm border-0 tab-role-cabang">
+          <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+            <h5 class="fw-bold mb-0 text-primary fs-6 fs-md-5">🏢 Master Data Cabang</h5>
+            <button class="btn btn-primary btn-sm fw-bold w-100-mobile" onclick="new bootstrap.Modal(document.getElementById('modalCabang')).show()">+ Cabang Baru</button>
+          </div>
+          <div class="table-responsive">
+            <table class="table table-hover align-middle">
+              <thead class="table-dark">
+                <tr>
+                  <th>ID</th>
+                  <th>Nama Cabang</th>
+                  <th>Latitude</th>
+                  <th>Longitude</th>
+                  <th>Radius</th>
+                  <th>Aksi</th>
+                </tr>
+              </thead>
+              <tbody id="tabelCabang"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4 border-start border-4 border-primary shadow-sm mb-4">
+          <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+            <h5 class="fw-bold mb-0 text-primary fs-6 fs-md-5">
+              <i class="bi bi-sliders"></i> Pengaturan Insentif & Rule Payroll Umum
+            </h5>
+            <span class="badge bg-primary">Per Cabang</span>
+          </div>
+
+          <form id="formPengaturanGajiKondisional" onsubmit="savePengaturanGaji(event)">
+            <div class="p-3 bg-light rounded border mb-3">
+              <div class="row g-2 align-items-center">
+                <div class="col-12 col-md-6">
+                  <label class="form-label fw-semibold small text-primary mb-1">
+                    <i class="bi bi-building"></i> Terapkan Aturan Untuk Cabang:
+                  </label>
+                  <select id="cfgCabangRuleUmum" class="form-select form-select-sm" onchange="loadRuleUmumByCabang()">
+                    <option value="Semua">Semua Cabang (Global)</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-6">
+                  <small class="text-muted d-block mt-md-3">
+                    *Pilih cabang spesifik untuk menetapkan aturan khusus cabang tersebut.
+                  </small>
+                </div>
+              </div>
+            </div>
+
+            <div class="row g-2 g-md-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small">Batas Jam Check-out Overtime</label>
+                <input type="time" id="cfgJamOvertime" class="form-control form-control-sm" value="17:30">
+              </div>
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small">Nominal Insentif Overtime / Hari (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text">Rp</span>
+                  <input type="number" id="cfgNominalOvertime" class="form-control" placeholder="15000" min="0">
+                </div>
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small">Nominal Insentif Kerja Pagi / Hari (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text">Rp</span>
+                  <input type="number" id="cfgNominalKerjaPagi" class="form-control" placeholder="10000" min="0">
+                </div>
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small">Nominal Uang Makan / Hari (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text">Rp</span>
+                  <input type="number" id="cfgNominalUangMakan" class="form-control" placeholder="15000" min="0">
+                </div>
+              </div>
+            </div>
+
+            <div class="text-end mt-3">
+              <button type="submit" id="btnSaveGajiKondisional" class="btn btn-sm btn-primary px-4 fw-bold w-100-mobile">
+                <i class="bi bi-save"></i> Simpan Rule Payroll Cabang
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="card card-custom p-3 p-md-4 border-start border-4 border-warning shadow-sm mb-4">
+          <div class="d-flex align-items-center justify-content-between mb-3 border-bottom pb-2">
+            <h5 class="fw-bold mb-0 text-warning-emphasis fs-6 fs-md-5">
+              <i class="bi bi-star-fill text-warning"></i> Pengaturan Insentif Khusus & Syarat Ketentuan
+            </h5>
+            <span class="badge bg-warning text-dark">Khusus Admin</span>
+          </div>
+
+          <form id="formInsentifKhusus" onsubmit="savePengaturanInsentifKhusus(event)">
+            <div class="row g-3 mb-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small">Filter Cabang Karyawan</label>
+                <select id="cfgCabangInsentifKhusus" class="form-select form-select-sm" onchange="renderListKaryawanInsentifKhusus()">
+                  <option value="Semua">Semua Cabang</option>
+                </select>
+              </div>
+
+              <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold small text-primary">Nominal Insentif Khusus Base (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text bg-primary text-white">Rp</span>
+                  <input type="number" id="cfgNominalInsentifKhusus" class="form-control border-primary" placeholder="50000" min="0">
+                </div>
+              </div>
+
+              <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold small">Syarat Min. Kehadiran (Hari/Minggu)</label>
+                <input type="number" id="cfgMinHadirKhusus" class="form-control form-control-sm" value="5" min="1" max="7">
+              </div>
+
+              <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold small">Potongan Per Terlambat (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text">Rp</span>
+                  <input type="number" id="cfgPotonganTerlambat" class="form-control" placeholder="10000" min="0">
+                </div>
+              </div>
+
+              <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold small text-success">Bonus Apresiasi Full 7 Hari (Rp)</label>
+                <div class="input-group input-group-sm">
+                  <span class="input-group-text bg-success text-white">Rp</span>
+                  <input type="number" id="cfgBonusFull7Hari" class="form-control border-success" placeholder="50000" min="0">
+                </div>
+              </div>
+
+              <div class="col-12">
+                <label class="form-label fw-semibold small text-dark">Pilih Karyawan Penerima Insentif Khusus:</label>
+                <div id="listKaryawanKhususCheck" class="d-flex flex-wrap gap-2 border p-3 bg-white rounded shadow-sm" style="max-height: 200px; overflow-y: auto;">
+                  <small class="text-muted">Memuat data karyawan...</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="text-end mt-3">
+              <button type="submit" id="btnSaveInsentifKhusus" class="btn btn-sm btn-warning px-4 fw-bold w-100-mobile">
+                <i class="bi bi-save"></i> Simpan Rule & Daftar Insentif Khusus
+              </button>
+            </div>
+          </form>
+        </div>
+
+        <div class="row g-3 mb-4">
+          <div class="col-12 col-lg-7">
+            <div class="card card-custom p-3 p-md-4 shadow-sm h-100 border-0">
+              <h6 class="fw-bold text-primary mb-3">
+                <i class="bi bi-table"></i> Ringkasan Rule Payroll Per Cabang
+              </h6>
+              <div class="table-responsive">
+                <table class="table table-sm table-striped align-middle small mb-0">
+                  <thead class="table-dark">
+                    <tr>
+                      <th>Cabang</th>
+                      <th>Jam Overtime</th>
+                      <th>Overtime</th>
+                      <th>Kerja Pagi</th>
+                      <th>Uang Makan</th>
+                    </tr>
+                  </thead>
+                  <tbody id="tbodySummaryRuleCabang">
+                    <tr><td colspan="5" class="text-center text-muted">Memuat data rule...</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-12 col-lg-5">
+            <div class="card card-custom p-3 p-md-4 shadow-sm h-100 border-0">
+              <h6 class="fw-bold text-warning-emphasis mb-3">
+                <i class="bi bi-people-fill text-warning"></i> Penerima Insentif Khusus
+              </h6>
+              <div id="boxSummaryInsentifKhusus" class="p-2 border rounded bg-light" style="max-height: 220px; overflow-y: auto;">
+                <small class="text-muted">Memuat penerima insentif khusus...</small>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 2. DIGANTI: Copy-paste seluruh isi file Modals.html di posisi ini -->
+<!-- MODAL KARYAWAN, CABANG, JADWAL, IZIN, DLL HARUS DITEMPEL DI SINI -->
+
+<!-- CDNs (JS) -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+<!-- 3. DIGANTI: Panggil file JavaScript external terpisah -->
+<script src="js/JS_Global.js"></script>
+<script src="js/JS_Map.js"></script>
+<script src="js/JS_Main.js"></script>
+</body>
+</html>

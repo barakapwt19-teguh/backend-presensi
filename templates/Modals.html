@@ -1,0 +1,657 @@
+<!-- ========================================== -->
+<!-- 1. MODAL ESTIMASI GAJI & SLIP (PRIVASI)   -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEstimasiGaji" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow-lg">
+      <div class="modal-header bg-success text-white">
+        <h5 class="modal-title fw-bold">
+          <i class="bi bi-wallet2 me-2"></i>Rincian Estimasi Gaji Mingguan
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body p-4">
+        <div class="text-center mb-3">
+          <small class="text-muted d-block">Periode Minggu Ini</small>
+          <span class="fw-bold text-dark fs-6" id="modalGajiPeriodeText">-</span>
+        </div>
+
+        <div class="bg-light p-3 rounded-3 border mb-3">
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-secondary small">Status Kehadiran:</span>
+          </div>
+          <div id="badgeKehadiranMingguIniModal" class="d-flex gap-1 flex-wrap mb-3">
+            <!-- Diisi via JS -->
+          </div>
+
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <span class="text-secondary small">Pendapatan Lain-lain (Pagi/Makan/OT):</span>
+            <span class="fw-bold text-primary" id="modalGajiLainLainText">Rp 0</span>
+          </div>
+        </div>
+
+        <div class="text-center p-3 bg-success-subtle rounded-3 border border-success">
+          <small class="text-success-emphasis fw-semibold d-block">TOTAL ESTIMASI DITERIMA</small>
+          <h2 class="fw-bold text-success mb-0" id="nominalGajiMingguIni">Rp 0</h2>
+          <small class="text-muted mt-1 d-block" style="font-size: 11px;">
+            *Sudah dipotong cicilan kasbon (jika ada) & dibulatkan ke atas.
+          </small>
+        </div>
+      </div>
+      <div class="modal-footer bg-light">
+        <button type="button" class="btn btn-secondary w-100 fw-semibold" data-bs-dismiss="modal">Tutup</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 2. MODAL EDIT / TANDAI PRESENSI ADMIN      -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEditPresensi" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">✏️ Edit & Koreksi Presensi Karyawan</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="simpanKoreksiPresensi(event)">
+        <div class="modal-body">
+          <input type="hidden" id="editPresensiId">
+          
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Karyawan</label>
+            <input type="text" id="editPresensiNama" class="form-control bg-light" readonly>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Tanggal Presensi</label>
+            <input type="text" id="editPresensiTanggal" class="form-control bg-light" readonly>
+          </div>
+          
+          <div class="row g-2 mb-3">
+            <div class="col-6">
+              <label class="form-label small fw-bold">Jam Masuk (Check-In)</label>
+              <input type="text" id="editPresensiJamMasuk" class="form-control" placeholder="HH:mm:ss" required>
+            </div>
+            <div class="col-6">
+              <label class="form-label small fw-bold">Jam Keluar (Check-Out)</label>
+              <input type="text" id="editPresensiJamKeluar" class="form-control" placeholder="HH:mm:ss">
+            </div>
+          </div>
+
+          <div class="card p-3 bg-light border-0 mb-3">
+            <label class="form-label small fw-bold text-primary mb-2">Penandaan Tambahan (Manual)</label>
+            <div class="form-check form-switch mb-2">
+              <input class="form-check-input" type="checkbox" id="editPresensiDapatKerjaPagi">
+              <label class="form-check-label small fw-semibold" for="editPresensiDapatKerjaPagi">Dapat Uang Kerja Pagi</label>
+            </div>
+            <div class="form-check form-switch">
+              <input class="form-check-input" type="checkbox" id="editPresensiDapatUangMakan">
+              <label class="form-check-label small fw-semibold" for="editPresensiDapatUangMakan">Dapat Uang Makan Hari Ini</label>
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Catatan Koreksi Admin</label>
+            <textarea id="editPresensiCatatan" class="form-control" rows="2" placeholder="Contoh: Koreksi jam pulang lupa checkout / Tugas luar kota"></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" id="btnSimpanKoreksi" class="btn btn-primary fw-bold">Simpan Koreksi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 3. MODAL BUAT JADWAL DISTRIBUSI MINGGUAN   -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalJadwal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">🚛 Buat Master Penjadwalan Distribusi Mingguan (Selasa - Senin)</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <form id="formGenerateJadwal" onsubmit="handleSaveJadwalMingguan(event)">
+        <div class="modal-body">
+          <div class="row g-3 mb-3 p-3 bg-light rounded border">
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Pilih Tanggal Mulai Siklus (Hari SELASA)</label>
+              <input type="date" id="genTglMulai" class="form-control" onchange="buildMingguanRows()" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Cabang Penugasan</label>
+              <select id="genIdCabang" class="form-select" onchange="buildMingguanRows()" required></select>
+            </div>
+          </div>
+
+          <div class="table-responsive">
+            <table class="table table-bordered table-sm align-middle mb-0">
+              <thead class="table-dark text-center small">
+                <tr>
+                  <th style="width: 14%;">Hari & Tanggal</th>
+                  <th style="width: 18%;">Area Tujuan</th>
+                  <th style="width: 14%;">Nopol Armada</th>
+                  <th style="width: 18%;">Sopir Utama</th>
+                  <th style="width: 18%;">Kenek (Helper)</th>
+                  <th style="width: 18%;">Catatan Rute</th>
+                </tr>
+              </thead>
+              <tbody id="containerRowMingguan">
+                <tr>
+                  <td colspan="6" class="text-center text-muted py-3">
+                    Silakan pilih tanggal awal siklus (Hari Selasa) untuk memuat form penugasan.
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Master Jadwal Mingguan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 4. MODAL EDIT JADWAL HARIAN                -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEditJadwal" tabindex="-1">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">✏️ Edit / Tukar Personel Jadwal (<span id="editJdwTglText"></span>)</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleEditJadwalSubmit(event)">
+        <div class="modal-body">
+          <input type="hidden" id="editJdwId">
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Area Wilayah Tujuan</label>
+              <select id="editJdwArea" class="form-select" onchange="autoFillNopolDefault(true)" required></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Plat Nomor Armada</label>
+              <input type="text" id="editJdwNopol" class="form-control" required>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Sopir Utama (Driver)</label>
+              <select id="editJdwSopir" class="form-select" required></select>
+            </div>
+            <div class="col-md-6">
+              <label class="form-label small fw-bold">Kenek Utama (Helper)</label>
+              <select id="editJdwKenek" class="form-select" required></select>
+            </div>
+            <div class="col-md-12">
+              <label class="form-label small fw-bold text-secondary">Staf Gudang / Bantuan (Opsional)</label>
+              <select id="editJdwGudang" class="form-select"></select>
+            </div>
+            <div class="col-12">
+              <label class="form-label small fw-bold">Keterangan / Alasan Perubahan</label>
+              <input type="text" id="editJdwKet" class="form-control" placeholder="Contoh: Menggantikan Sopir A yang sakit">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 5. MODAL TAMBAH AREA DISTRIBUSI            -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalArea" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">📍 Tambah Master Area Distribusi</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleSaveArea(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Wilayah Area</label>
+            <input type="text" id="areaNama" class="form-control" placeholder="Contoh: Purwokerto Utara & Baturraden" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Plat Nomor Armada Default (Opsional)</label>
+            <input type="text" id="areaNopol" class="form-control" placeholder="Contoh: R 8923 BS">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Area</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 6. MODAL REGISTER MANDIRI KARYAWAN         -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalRegister" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">Pendaftaran Karyawan Baru</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleRegister(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Lengkap</label>
+            <input type="text" id="regNama" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Email</label>
+            <input type="email" id="regEmail" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Jabatan / Posisi</label>
+            <select id="regJabatan" class="form-select" required>
+              <option value="Sopir">Sopir</option>
+              <option value="Kenek">Kenek</option>
+              <option value="Staf Gudang">Staf Gudang</option>
+              <option value="Staf Admin Cabang">Staf Admin Cabang</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Cabang Penempatan</label>
+            <select id="regCabang" class="form-select" required></select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Hari Libur Rutin Mingguan</label>
+            <select id="regHariLibur" class="form-select" required>
+              <option value="Minggu">Minggu</option>
+              <option value="Senin">Senin</option>
+              <option value="Selasa">Selasa</option>
+              <option value="Rabu">Rabu</option>
+              <option value="Kamis">Kamis</option>
+              <option value="Jumat">Jumat</option>
+              <option value="Sabtu">Sabtu</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Username</label>
+            <input type="text" id="regUser" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Password</label>
+            <input type="password" id="regPass" class="form-control" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Daftar Akun</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 7. MODAL TUKAR LIBUR                       -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalTukarLibur" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">🔄 Pengajuan Tukar Hari Libur</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleFormTukarLibur(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Tanggal Libur Anda Yang Ditukar</label>
+            <input type="date" id="tukarTglPemohon" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Pilih Rekan Pengganti</label>
+            <select id="tukarIdPengganti" class="form-select" required></select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Tanggal Libur Rekan Yang Diambil</label>
+            <input type="date" id="tukarTglPengganti" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Alasan Tukar Libur</label>
+            <textarea id="tukarAlasan" class="form-control" rows="2" required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Kirim Pengajuan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 8. MODAL FORM IZIN / CUTI                  -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalIzin" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">📝 Form Pengajuan Izin / Cuti</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleFormIzin(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Tanggal Mulai</label>
+            <input type="date" id="izinStart" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Tanggal Selesai</label>
+            <input type="date" id="izinEnd" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Jenis Perizinan</label>
+            <select id="izinJenis" class="form-select" required>
+              <option value="Izin">Izin Tidak Masuk</option>
+              <option value="Sakit">Sakit</option>
+              <option value="Cuti">Cuti Tahunan</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Keterangan / Alasan</label>
+            <textarea id="izinKet" class="form-control" rows="2" required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Kirim Pengajuan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 9. MODAL EDIT KARYAWAN                     -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEditKaryawan" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">Edit Data Karyawan</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleEditKaryawanSubmit(event)">
+        <div class="modal-body">
+          <input type="hidden" id="editEmpId">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Lengkap</label>
+            <input type="text" id="editEmpNama" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Posisi / Jabatan</label>
+            <input type="text" id="editEmpPosisi" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Cabang</label>
+            <select id="editEmpCabang" class="form-select" required></select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Email</label>
+            <input type="email" id="editEmpEmail" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Role Akses</label>
+            <select id="editEmpRole" class="form-select" required>
+              <option value="Karyawan">Karyawan</option>
+              <option value="Staf Admin Cabang">Staf Admin Cabang</option>
+              <option value="Admin Cabang">Admin Cabang</option>
+              <option value="HRD">HRD</option>
+              <option value="Admin">Admin (Super Admin)</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Hari Libur Rutin</label>
+            <select id="editEmpHariLibur" class="form-select" required>
+              <option value="Minggu">Minggu</option>
+              <option value="Senin">Senin</option>
+              <option value="Selasa">Selasa</option>
+              <option value="Rabu">Rabu</option>
+              <option value="Kamis">Kamis</option>
+              <option value="Jumat">Jumat</option>
+              <option value="Sabtu">Sabtu</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Gaji Harian (Rp)</label>
+            <input type="number" id="editEmpGaji" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold text-success">
+              <i class="bi bi-shield-check"></i> Insentif Khusus Tetap / Jabatan (Rp)
+            </label>
+            <div class="input-group">
+              <span class="input-group-text bg-success text-white">Rp</span>
+              <input type="number" id="editEmpInsentifKhususTetap" class="form-control border-success" placeholder="0" min="0" value="0">
+            </div>
+            <small class="text-muted d-block mt-1">*Insentif tetap mingguan per individu (tanpa syarat).</small>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Status Akun</label>
+            <select id="editEmpStatus" class="form-select" required>
+              <option value="Aktif">Aktif</option>
+              <option value="Non-Aktif">Non-Aktif</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 10. MODAL TAMBAH KARYAWAN ADMIN            -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalKaryawan" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold" id="modalKaryawanTitle">+ Karyawan Baru</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="saveKaryawan(event)">
+        <div class="modal-body">
+          <input type="hidden" id="empIdKey">
+
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Lengkap</label>
+            <input type="text" id="empNama" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Posisi</label>
+            <input type="text" id="empPosisi" class="form-control" placeholder="Sopir / Kenek / Staf Gudang" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Cabang</label>
+            <select id="empCabang" class="form-select" required></select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Email</label>
+            <input type="email" id="empEmail" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Role Akses</label>
+            <select id="empRole" class="form-select" required>
+              <option value="Karyawan">Karyawan</option>
+              <option value="Staf Admin Cabang">Staf Admin Cabang</option>
+              <option value="Admin Cabang">Admin Cabang</option>
+              <option value="HRD">HRD</option>
+              <option value="Admin">Admin</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Hari Libur Rutin</label>
+            <select id="empHariLibur" class="form-select" required>
+              <option value="Minggu">Minggu</option>
+              <option value="Senin">Senin</option>
+              <option value="Selasa">Selasa</option>
+              <option value="Rabu">Rabu</option>
+              <option value="Kamis">Kamis</option>
+              <option value="Jumat">Jumat</option>
+              <option value="Sabtu">Sabtu</option>
+            </select>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Gaji Harian (Rp)</label>
+            <input type="number" id="empGaji" class="form-control" required>
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label small fw-bold text-success">
+              <i class="bi bi-shield-check"></i> Insentif Khusus Tetap / Jabatan (Rp)
+            </label>
+            <div class="input-group">
+              <span class="input-group-text bg-success text-white">Rp</span>
+              <input type="number" id="empInsentifKhususTetap" class="form-control border-success" placeholder="0" min="0" value="0">
+            </div>
+            <small class="text-muted d-block mt-1">*Insentif tetap mingguan per individu (tanpa syarat).</small>
+          </div>
+          
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Username</label>
+            <input type="text" id="empUser" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Password</label>
+            <input type="password" id="empPass" class="form-control" placeholder="Isi untuk ubah password">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" id="btnSaveKaryawan" class="btn btn-primary fw-bold">Simpan Karyawan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 11. MODAL TAMBAH CABANG                    -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalCabang" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">+ Cabang Baru</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="saveCabang(event)">
+        <div class="modal-body">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Cabang</label>
+            <input type="text" id="cabNama" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Latitude</label>
+            <input type="number" step="any" id="cabLat" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Longitude</label>
+            <input type="number" step="any" id="cabLong" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Radius Presensi (Meter)</label>
+            <input type="number" id="cabRadius" class="form-control" value="100" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Cabang</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 12. MODAL EDIT CABANG                      -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEditCabang" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">Edit Data Cabang</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleEditCabangSubmit(event)">
+        <div class="modal-body">
+          <input type="hidden" id="editCabId">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Nama Cabang</label>
+            <input type="text" id="editCabNama" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Latitude</label>
+            <input type="number" step="any" id="editCabLat" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Longitude</label>
+            <input type="number" step="any" id="editCabLong" class="form-control" required>
+          </div>
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Radius Presensi (Meter)</label>
+            <input type="number" id="editCabRadius" class="form-control" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ========================================== -->
+<!-- 13. MODAL EDIT IZIN ADMIN                  -->
+<!-- ========================================== -->
+<div class="modal fade" id="modalEditIzin" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title fw-bold">Edit Status Perizinan</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+      </div>
+      <form onsubmit="handleEditIzinSubmit(event)">
+        <div class="modal-body">
+          <input type="hidden" id="editIzinId">
+          <div class="mb-3">
+            <label class="form-label small fw-bold">Status Persetujuan</label>
+            <select id="editIzinStatus" class="form-select" required>
+              <option value="Disetujui">Disetujui</option>
+              <option value="Ditolak">Ditolak</option>
+            </select>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Batal</button>
+          <button type="submit" class="btn btn-primary fw-bold">Simpan Perubahan</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>

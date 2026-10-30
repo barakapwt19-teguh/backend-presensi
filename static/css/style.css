@@ -1,0 +1,203 @@
+:root {
+    --sidebar-width: 250px;
+    
+    /* TIMPA WARNA BAWAAN BOOTSTRAW UTAMA */
+    --bs-primary: #003366 !important;
+    --bs-primary-rgb: 0, 51, 102 !important;
+
+    /* PALET WARNA BARU */
+    --primary-dark: #003366;     /* Biru Tua Utama */
+    --primary-color: #003366;    /* Penyelarasan variabel lama ke Biru Tua */
+    --primary-light: #e6f2ff;    /* Biru Muda Latar */
+    --accent-red: #dc3545;       /* Merah Aksen Pemanis */
+    --accent-red-hover: #bb2d3b; /* Merah Hover */
+    --dark-bg: #002244;          /* Biru Tua Gelap untuk Sidebar */
+  }
+
+  /* PAKSA KELAS BOOTSTRAW MENGIKUTI BIRU TUA & MERAH */
+  .bg-primary {
+    background-color: var(--primary-dark) !important;
+  }
+
+  .text-primary {
+    color: var(--primary-dark) !important;
+  }
+
+  .btn-primary {
+    background-color: var(--primary-dark) !important;
+    border-color: var(--primary-dark) !important;
+  }
+
+  .btn-primary:hover, .btn-primary:focus {
+    background-color: #002244 !important;
+    border-color: #002244 !important;
+  }
+
+  .btn-outline-primary {
+    color: var(--primary-dark) !important;
+    border-color: var(--primary-dark) !important;
+  }
+
+  .btn-outline-primary:hover {
+    background-color: var(--primary-dark) !important;
+    color: #ffffff !important;
+  }
+
+  body {
+    background-color: #f4f7fa;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    overflow-x: hidden;
+    color: #1e293b;
+  }
+
+  /* SIDEBAR STYLING */
+  #sidebar {
+    width: var(--sidebar-width);
+    height: 100vh;
+    position: fixed;
+    top: 0;
+    left: 0;
+    background-color: var(--dark-bg);
+    color: #fff;
+    transition: all 0.3s ease;
+    z-index: 1040;
+    display: flex;
+    flex-direction: column;
+  }
+
+  #sidebar .sidebar-header {
+    padding: 20px 15px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  #sidebar .nav-link {
+    color: #cbd5e1;
+    padding: 12px 20px;
+    margin: 4px 10px;
+    border-radius: 8px;
+    font-weight: 500;
+    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #sidebar .nav-link:hover, #sidebar .nav-link.active {
+    color: #fff;
+    background-color: rgba(255, 255, 255, 0.15);
+  }
+
+  #sidebar .nav-link.active {
+    background-color: var(--primary-dark);
+    border-left: 4px solid var(--accent-red); /* Merah pemanis di nav active */
+  }
+
+  /* MAIN CONTENT AREA */
+  #main-content {
+    margin-left: var(--sidebar-width);
+    padding: 25px;
+    transition: all 0.3s ease;
+    min-height: 100vh;
+  }
+
+  /* CARDS & UI COMPONENTS */
+  .card-custom {
+    border: none;
+    border-radius: 14px;
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.04);
+    background: #ffffff;
+  }
+
+  /* HEADER TERPADU DENGAN GRADASI BIRU MUDA */
+  .header-terpadu {
+    background: linear-gradient(135deg, #ffffff 0%, var(--primary-light) 100%);
+    border-left: 5px solid var(--primary-dark) !important;
+  }
+
+  /* KELAS AKSEN WARNA BARU */
+  .text-primary-custom {
+    color: var(--primary-dark) !important;
+  }
+
+  /* Tombol Logout Merah Pemanis */
+  .btn-logout-custom {
+    color: var(--accent-red);
+    border-color: var(--accent-red);
+    transition: all 0.2s;
+  }
+
+  .btn-logout-custom:hover {
+    background-color: var(--accent-red);
+    color: #ffffff;
+  }
+
+  /* Card Estimasi Gaji Biru Muda + Border Biru Tua */
+  .card-estimasi-custom {
+    background-color: #ffffff !important;
+    border: 1px solid #b3d7ff !important;
+  }
+
+  /* Modal Header Biru Tua */
+  .modal-header-custom {
+    background-color: var(--primary-dark) !important;
+  }
+
+  .app-logo {
+    max-width: 160px;
+    max-height: 45px;
+    width: auto;
+    height: auto;
+    object-fit: contain;
+    border-radius: 8px;
+  }
+
+  #map {
+    height: 350px;
+    width: 100%;
+    border-radius: 14px;
+    box-shadow: inset 0 0 8px rgba(0, 0, 0, 0.08);
+  }
+
+  .stat-card {
+    border-left: 4px solid var(--primary-dark);
+  }
+
+  /* RESPONSIVE MOBILE */
+  @media (max-width: 768px) {
+    #sidebar {
+      margin-left: calc(-1 * var(--sidebar-width));
+    }
+    #sidebar.active {
+      margin-left: 0;
+    }
+    #main-content {
+      margin-left: 0;
+      padding: 15px;
+    }
+    #sidebarOverlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 1030;
+      display: none;
+    }
+    #sidebarOverlay.show {
+      display: block;
+    }
+
+    #map {
+      height: 250px;
+    }
+
+    .table {
+      font-size: 12px;
+    }
+
+    .table th, .table td {
+      padding: 8px 6px;
+    }
+
+    .w-100-mobile {
+      width: 100% !important;
+    }
+  }
