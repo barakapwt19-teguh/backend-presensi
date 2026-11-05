@@ -7,7 +7,7 @@ import asyncio
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-
+from pydantic import BaseModel
 from google.oauth2.service_account import Credentials
 import gspread
 from pydantic import BaseModel
@@ -125,6 +125,10 @@ def sync_turso_to_sheets():
         return {"status": "success", "message": "Berhasil mengekspor data Turso ke Google Sheets!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+class LoginPayload(BaseModel):
+    username: str
+    password: str
 
 # Konfigurasi Google Sheets
 SCOPES = [
