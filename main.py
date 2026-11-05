@@ -2,6 +2,7 @@ import json
 import math
 import os
 from datetime import datetime, timedelta
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from google.oauth2.service_account import Credentials
@@ -10,9 +11,12 @@ from pydantic import BaseModel
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+
+# 1. Definisikan BASE_DIR menggunakan path absolut (Wajib untuk Vercel)
+BASE_DIR = Path(__file__).resolve().parent
 
 app = FastAPI(title="Backend Presensi & Operasional Logistik Baraka")
 
@@ -24,11 +28,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- TAMBAHKAN DUA BARIS INI (Menghubungkan Folder Static & Templates) ---
-app.mount("/static", StaticFiles(directory="static"), name="static")
-templates = Jinja2Templates(directory="templates")
+# 2. Hubungkan folder Static & Templates dengan path absolut BASE_DIR
+static_dir = os.path.join(BASE_DIR, "static")
+templates_dir = os.path.join(BASE_DIR, "templates")
 
-# --- UBAH RUTE ROOT (/) MENJADI INI ---
+if os.path.exists(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+templates = Jinja2Templates(directory=templates_dir)
+
+# 3. Rute Utama (Index.html)
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
     return templates.TemplateResponse(
@@ -36,6 +45,23 @@ async def read_root(request: Request):
         name="Index.html"
     )
 
+# 4. Rute Favicon (Mencegah Error 404 Favicon)
+@app.get("/favicon.ico", include_in_schema=False)
+async def favicon():
+    favicon_path = os.path.join(static_dir, "favicon.ico")
+    if os.path.exists(favicon_path):
+        return FileResponse(favicon_path)
+    return Response(status_code=204)
+
+# 5. Rute Modals.html (Mencegah Error 404 Modals)
+@app.get("/Modals.html", response_class=HTMLResponse)
+async def get_modals(request: Request):
+    return templates.TemplateResponse(
+        request=request, 
+        name="Modals.html"
+    )
+
+# Konfigurasi Google Sheets
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive",
