@@ -2,6 +2,7 @@ fastapi
 uvicorn
 gspread
 google-auth
+google-auth-httplib2
 pydantic
+jinja2
 sqlalchemy
-sqlalchemy-libsql
