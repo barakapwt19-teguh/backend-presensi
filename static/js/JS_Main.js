@@ -47,7 +47,7 @@ async function apiFetch(endpoint, options = {}) {
   };
 
   try {
-    const baseUrl = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "https://backend-presensi-tau.vercel.app";
+    const baseUrl = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : window.location.origin;
     const targetUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
     
     const response = await fetch(targetUrl, config);
