@@ -7,8 +7,6 @@
 // Global State
 let map, userMarker, branchCircle;
 let userLat = 0, userLong = 0;
-let CURRENT_USER = null;
-let GLOBAL_DATA = {};
 let idleTimer;
 
 // Re-render Peta Leaflet secara otomatis saat Tab Presensi di-klik
