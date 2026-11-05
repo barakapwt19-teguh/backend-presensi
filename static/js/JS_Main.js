@@ -1,6 +1,17 @@
+/**
+ * ============================================================================
+ * CLIENT-SIDE API & APPLICATION LOGIC (FastAPI Migration)
+ * ============================================================================
+ */
+
+// Global State
 let map, userMarker, branchCircle;
 let userLat = 0, userLong = 0;
+let CURRENT_USER = null;
+let GLOBAL_DATA = {};
+let idleTimer;
 
+// Re-render Peta Leaflet secara otomatis saat Tab Presensi di-klik
 document.addEventListener("DOMContentLoaded", () => {
   const tabPresensi = document.getElementById('tab-presensi-nav');
   if (tabPresensi) {
@@ -10,38 +21,88 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     });
   }
+  checkSession();
 });
 
-// 🟢 DIGANTI DENGAN FETCH API (LOGIN)
+/**
+ * ----------------------------------------------------------------------------
+ * HELPER: API Fetch Wrapper
+ * ----------------------------------------------------------------------------
+ */
+async function apiFetch(endpoint, options = {}) {
+  const defaultHeaders = {
+    'Content-Type': 'application/json',
+    'Accept': 'application/json'
+  };
+
+  // Tambahkan Token Auth jika ada di session
+  if (CURRENT_USER && CURRENT_USER.token) {
+    defaultHeaders['Authorization'] = `Bearer ${CURRENT_USER.token}`;
+  }
+
+  const config = {
+    ...options,
+    headers: {
+      ...defaultHeaders,
+      ...options.headers
+    }
+  };
+
+  try {
+    const baseUrl = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "https://backend-presensi-tau.vercel.app";
+    const targetUrl = endpoint.startsWith('http') ? endpoint : `${baseUrl}${endpoint}`;
+    
+    const response = await fetch(targetUrl, config);
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(data.message || data.detail || `HTTP Error ${response.status}`);
+    }
+    return data;
+  } catch (err) {
+    console.error(`API Error [${endpoint}]:`, err);
+    throw err;
+  }
+}
+
+/**
+ * ----------------------------------------------------------------------------
+ * AUTHENTICATION & SESSION MANAGEMENT
+ * ----------------------------------------------------------------------------
+ */
 async function handleLogin(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
   const u = document.getElementById('loginUsername').value;
   const p = document.getElementById('loginPassword').value;
   const btn = document.getElementById('btnLogin');
-  btn.disabled = true;
-  btn.innerText = "Memeriksa...";
+  
+  if (btn) {
+    btn.disabled = true;
+    btn.innerText = "Memeriksa...";
+  }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/login`, {
+    const res = await apiFetch('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: u, password: p })
     });
-    const res = await response.json();
 
-    btn.disabled = false;
-    btn.innerText = "Masuk Sistem";
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "Masuk Sistem";
+    }
 
-    if (res && res.status === 'success') {
-      CURRENT_USER = res.user;
+    if (res && (res.status === 'success' || res.user)) {
+      CURRENT_USER = res.user || res;
       localStorage.setItem('APP_USER_SESSION', JSON.stringify(CURRENT_USER));
       showDashboard();
     } else {
       alert(res ? res.message : 'Gagal terhubung ke server.');
     }
   } catch (err) {
-    btn.disabled = false;
-    btn.innerText = "Masuk Sistem";
+    if (btn) {
+      btn.disabled = false;
+      btn.innerText = "Masuk Sistem";
+    }
     alert("Terjadi kesalahan sistem: " + err.message);
   }
 }
@@ -61,35 +122,42 @@ function checkSession() {
 function handleLogout() {
   localStorage.removeItem('APP_USER_SESSION');
   CURRENT_USER = null;
-  document.getElementById('dashboardView').classList.add('d-none');
-  document.getElementById('loginView').classList.remove('d-none');
+  const dashView = document.getElementById('dashboardView');
+  const loginView = document.getElementById('loginView');
+  if (dashView) dashView.classList.add('d-none');
+  if (loginView) loginView.classList.remove('d-none');
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function runDatabaseSetup() {
-  if (confirm("Jalankan setup database otomatis pada server ini?")) {
+  if (confirm("Jalankan setup database otomatis pada Google Sheets ini?")) {
     try {
-      const response = await fetch(`${API_BASE_URL}/api/setup-database`, { method: 'POST' });
-      const res = await response.json();
+      const res = await apiFetch('/api/admin/setup-database', { method: 'POST' });
       alert(res.message);
       loadAppData();
     } catch (err) {
-      alert("Error setup database: " + err.message);
+      alert("Gagal melakukan setup database: " + err.message);
     }
   }
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * DASHBOARD & INITIAL DATA LOAD
+ * ----------------------------------------------------------------------------
+ */
 function showDashboard() {
-  document.getElementById('loginView').classList.add('d-none');
-  document.getElementById('dashboardView').classList.remove('d-none');
+  const loginView = document.getElementById('loginView');
+  const dashView = document.getElementById('dashboardView');
+  if (loginView) loginView.classList.add('d-none');
+  if (dashView) dashView.classList.remove('d-none');
 
   const welcomeEl = document.getElementById('userWelcome');
-  if (welcomeEl) {
-    welcomeEl.innerText = `Halo, ${CURRENT_USER.nama_lengkap} (${CURRENT_USER.posisi || CURRENT_USER.jabatan || 'Staff'})`;
+  if (welcomeEl && CURRENT_USER) {
+    welcomeEl.innerText = `Halo, ${CURRENT_USER.nama_lengkap || CURRENT_USER.nama} (${CURRENT_USER.posisi || CURRENT_USER.jabatan || 'Staff'})`;
   }
 
   const badge = document.getElementById('roleBadge');
-  if (badge) {
+  if (badge && CURRENT_USER) {
     badge.innerText = CURRENT_USER.role;
     let bgClass = 'bg-primary';
     if (CURRENT_USER.role === 'Admin') bgClass = 'bg-danger';
@@ -100,7 +168,7 @@ function showDashboard() {
   }
 
   const cardGaji = document.getElementById('cardEstimasiGaji');
-  if (cardGaji) {
+  if (cardGaji && CURRENT_USER) {
     if (CURRENT_USER.role === 'Staf Admin Cabang') {
       cardGaji.classList.add('d-none');
     } else {
@@ -108,53 +176,55 @@ function showDashboard() {
     }
   }
 
+  // 1. Reset / Sembunyikan elemen role khusus
   document.querySelectorAll('.tab-role-karyawan, .tab-role-cabang, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.add('d-none'));
   document.querySelectorAll('.role-hrd, .role-admin, .role-admin-cabang').forEach(el => el.classList.add('d-none'));
 
   const tabPengaturanNav = document.getElementById('tab-pengaturan');
   const filterAdminOnly = document.querySelectorAll('.filter-admin-only');
 
-  if (CURRENT_USER.role === 'Admin') {
-    document.querySelectorAll('.tab-role-karyawan, .tab-role-cabang, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
-    document.querySelectorAll('.role-hrd, .role-admin, .role-admin-cabang').forEach(el => el.classList.remove('d-none'));
-    filterAdminOnly.forEach(el => el.classList.remove('d-none'));
-    if (tabPengaturanNav) tabPengaturanNav.classList.remove('d-none');
-  } else if (CURRENT_USER.role === 'HRD') {
-    document.querySelectorAll('.tab-role-karyawan, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
-    document.querySelectorAll('.role-hrd').forEach(el => el.classList.remove('d-none'));
-    filterAdminOnly.forEach(el => el.classList.remove('d-none'));
-    if (tabPengaturanNav) tabPengaturanNav.classList.remove('d-none');
-  } else if (CURRENT_USER.role === 'Admin Cabang') {
-    document.querySelectorAll('.tab-role-karyawan, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
-    document.querySelectorAll('.role-admin-cabang').forEach(el => el.classList.remove('d-none'));
-    filterAdminOnly.forEach(el => el.classList.remove('d-none'));
-    if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
-  } else if (CURRENT_USER.role === 'Staf Admin Cabang') {
-    document.querySelectorAll('.tab-role-karyawan, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
-    document.querySelectorAll('.role-admin-cabang').forEach(el => el.classList.remove('d-none'));
-    filterAdminOnly.forEach(el => el.classList.remove('d-none'));
-    if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
-  } else {
-    filterAdminOnly.forEach(el => el.classList.add('d-none'));
-    if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
+  // 2. Tampilkan elemen sesuai role pengguna
+  if (CURRENT_USER) {
+    if (CURRENT_USER.role === 'Admin') {
+      document.querySelectorAll('.tab-role-karyawan, .tab-role-cabang, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
+      document.querySelectorAll('.role-hrd, .role-admin, .role-admin-cabang').forEach(el => el.classList.remove('d-none'));
+      filterAdminOnly.forEach(el => el.classList.remove('d-none'));
+      if (tabPengaturanNav) tabPengaturanNav.classList.remove('d-none');
+    } else if (CURRENT_USER.role === 'HRD') {
+      document.querySelectorAll('.tab-role-karyawan, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
+      document.querySelectorAll('.role-hrd').forEach(el => el.classList.remove('d-none'));
+      filterAdminOnly.forEach(el => el.classList.remove('d-none'));
+      if (tabPengaturanNav) tabPengaturanNav.classList.remove('d-none');
+    } else if (CURRENT_USER.role === 'Admin Cabang') {
+      document.querySelectorAll('.tab-role-karyawan, .tab-role-acc, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
+      document.querySelectorAll('.role-admin-cabang').forEach(el => el.classList.remove('d-none'));
+      filterAdminOnly.forEach(el => el.classList.remove('d-none'));
+      if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
+    } else if (CURRENT_USER.role === 'Staf Admin Cabang') {
+      document.querySelectorAll('.tab-role-karyawan, .tab-role-payroll, .tab-role-histori-admin').forEach(el => el.classList.remove('d-none'));
+      document.querySelectorAll('.role-admin-cabang').forEach(el => el.classList.remove('d-none'));
+      filterAdminOnly.forEach(el => el.classList.remove('d-none'));
+      if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
+    } else {
+      filterAdminOnly.forEach(el => el.classList.add('d-none'));
+      if (tabPengaturanNav) tabPengaturanNav.classList.add('d-none');
+    }
   }
 
   loadAppData();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function loadAppData() {
   if (!CURRENT_USER || !CURRENT_USER.id_karyawan) return;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/initial-data?id_karyawan=${CURRENT_USER.id_karyawan}&role=${CURRENT_USER.role}`);
-    const data = await response.json();
-
+    const data = await apiFetch(`/api/app/initial-data?id_karyawan=${CURRENT_USER.id_karyawan}&role=${CURRENT_USER.role}`);
     if (!data) return alert("Gagal memuat data dari server.");
+
     GLOBAL_DATA = data;
     try { applySettings(data.settings); } catch(e){}
     try { populateDropdowns(); } catch(e){}
-    try { initMapAndLocation(); } catch(e){}
+    try { if (typeof initMapAndLocation === 'function') initMapAndLocation(); } catch(e){}
     try { updateActionButtonState(data.statusAbsen); } catch(e){}
     try { renderCardJadwalHariIni(data.jadwalHariIni); } catch(e){}
     try { renderRingkasanGaji(data); } catch(e){}
@@ -210,6 +280,11 @@ function applySettings(set) {
   if (elContact) elContact.value = set.contact_info || '';
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * PRESENSI & JADWAL LOGIC
+ * ----------------------------------------------------------------------------
+ */
 function updateActionButtonState(statusAbsen) {
   const btnIn = document.getElementById('btnCheckIn');
   const btnOut = document.getElementById('btnCheckOut');
@@ -235,9 +310,9 @@ function updateActionButtonState(statusAbsen) {
     if (btnIn) { btnIn.classList.remove('d-none'); btnIn.disabled = true; }
     if (banner) {
       banner.className = "alert alert-warning border-0 shadow-sm mb-4";
-      iconPeringatan.innerText = "📝";
-      titlePeringatan.innerText = "Status: Sedang Izin / Cuti Hari Ini";
-      textPeringatan.innerHTML = "Anda dalam masa izin atau cuti yang telah disetujui. Tombol presensi dinonaktifkan.";
+      if (iconPeringatan) iconPeringatan.innerText = "📝";
+      if (titlePeringatan) titlePeringatan.innerText = "Status: Sedang Izin / Cuti Hari Ini";
+      if (textPeringatan) textPeringatan.innerHTML = "Anda dalam masa izin atau cuti yang telah disetujui. Tombol presensi dinonaktifkan.";
       banner.classList.remove('d-none');
     }
   } else if (statusAbsen === 'HARI_LIBUR_OPSIONAL') {
@@ -245,18 +320,18 @@ function updateActionButtonState(statusAbsen) {
     if (btnIn) { btnIn.classList.remove('d-none'); btnIn.disabled = false; }
     if (banner) {
       banner.className = "alert alert-info border-0 shadow-sm mb-4";
-      iconPeringatan.innerText = "📅";
-      titlePeringatan.innerText = "Informasi: Jadwal Libur Rutin";
-      textPeringatan.innerHTML = `Hari ini adalah jadwal libur rutin Anda. Presensi bersifat opsional.<br>${petunjukGPS}`;
+      if (iconPeringatan) iconPeringatan.innerText = "📅";
+      if (titlePeringatan) titlePeringatan.innerText = "Informasi: Jadwal Libur Rutin";
+      if (textPeringatan) textPeringatan.innerHTML = `Hari ini adalah jadwal libur rutin Anda. Presensi bersifat opsional.<br>${petunjukGPS}`;
       banner.classList.remove('d-none');
     }
   } else if (statusAbsen === 'BELUM_ABSEN') {
     if (btnIn) { btnIn.classList.remove('d-none'); btnIn.disabled = false; }
     if (banner) {
       banner.className = "alert alert-warning border-0 shadow-sm mb-4";
-      iconPeringatan.innerText = "⚠️";
-      titlePeringatan.innerText = "Perhatian: Anda Belum Check-In Masuk!";
-      textPeringatan.innerHTML = `Silakan lakukan Check-in lokasi presensi sekarang untuk mencatat kehadiran hari ini.<br>${petunjukGPS}`;
+      if (iconPeringatan) iconPeringatan.innerText = "⚠️";
+      if (titlePeringatan) titlePeringatan.innerText = "Perhatian: Anda Belum Check-In Masuk!";
+      if (textPeringatan) textPeringatan.innerHTML = `Silakan lakukan Check-in lokasi presensi sekarang untuk mencatat kehadiran hari ini.<br>${petunjukGPS}`;
       banner.classList.remove('d-none');
     }
   } else if (statusAbsen === 'SUDAH_CHECKIN') {
@@ -266,18 +341,18 @@ function updateActionButtonState(statusAbsen) {
     }
     if (banner) {
       banner.className = "alert alert-info border-0 shadow-sm mb-4";
-      iconPeringatan.innerText = "🔔";
-      titlePeringatan.innerText = "Pengingat: Jangan Lupa Check-Out Keluar";
-      textPeringatan.innerHTML = `Anda telah Check-in masuk.<br>⏰ <b>Batas Check-Out:</b> Tombol aktif pukul 14:00 WIB.<br>⚠️ <i>Check-Out sebelum 16:30 WIB dihitung SETENGAH HARI (0.5 hari kerja).</i>`;
+      if (iconPeringatan) iconPeringatan.innerText = "🔔";
+      if (titlePeringatan) titlePeringatan.innerText = "Pengingat: Jangan Lupa Check-Out Keluar";
+      if (textPeringatan) textPeringatan.innerHTML = `Anda telah Check-in masuk.<br>⏰ <b>Batas Check-Out:</b> Tombol aktif pukul 14:00 WIB.<br>⚠️ <i>Check-Out sebelum 16:30 WIB dihitung SETENGAH HARI (0.5 hari kerja).</i>`;
       banner.classList.remove('d-none');
     }
   } else if (statusAbsen === 'SUDAH_CHECKOUT') {
     if (doneAlert) doneAlert.classList.remove('d-none');
     if (banner) {
       banner.className = "alert alert-success border-0 shadow-sm mb-4";
-      iconPeringatan.innerText = "✔";
-      titlePeringatan.innerText = "Presensi Hari Ini Selesai";
-      textPeringatan.innerHTML = "Terima kasih! Anda telah menyelesaikan presensi Check-in dan Check-out untuk hari ini.";
+      if (iconPeringatan) iconPeringatan.innerText = "✔";
+      if (titlePeringatan) titlePeringatan.innerText = "Presensi Hari Ini Selesai";
+      if (textPeringatan) textPeringatan.innerHTML = "Terima kasih! Anda telah menyelesaikan presensi Check-in dan Check-out untuk hari ini.";
       banner.classList.remove('d-none');
     }
   }
@@ -299,10 +374,10 @@ function renderCardJadwalHariIni(jdw) {
   if (jdw.id_gudang) {
     textTim += ` | <b>Bantuan:</b> ${getEmpName(jdw.id_gudang)}`;
   }
-  document.getElementById('badgePeranJadwal').innerText = `Jadwal Distribusi: ${jdw.peran_user}`;
-  document.getElementById('titleAreaJadwal').innerText = jdw.nama_area;
-  document.getElementById('detailJadwalTim').innerHTML = textTim;
-  document.getElementById('detailJadwalNopol').innerText = `Armada: ${jdw.nopol} ${jdw.keterangan ? ' ('+jdw.keterangan+')' : ''}`;
+  if (document.getElementById('badgePeranJadwal')) document.getElementById('badgePeranJadwal').innerText = `Jadwal Distribusi: ${jdw.peran_user}`;
+  if (document.getElementById('titleAreaJadwal')) document.getElementById('titleAreaJadwal').innerText = jdw.nama_area;
+  if (document.getElementById('detailJadwalTim')) document.getElementById('detailJadwalTim').innerHTML = textTim;
+  if (document.getElementById('detailJadwalNopol')) document.getElementById('detailJadwalNopol').innerText = `Armada: ${jdw.nopol} ${jdw.keterangan ? ' ('+jdw.keterangan+')' : ''}`;
   card.classList.remove('d-none');
 }
 
@@ -432,7 +507,7 @@ function showModalEstimasiGaji() {
 
 function filterEmployeeOptionsBySelected(excludeIds = []) {
   let opts = '<option value="">-- Pilih Karyawan --</option>';
-  const isCabangScope = (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
+  const isCabangScope = CURRENT_USER && (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
   if (GLOBAL_DATA.allKaryawanPublic) {
     GLOBAL_DATA.allKaryawanPublic.forEach(e => {
       if (isCabangScope && String(e.id_cabang) !== String(CURRENT_USER.id_cabang)) return;
@@ -473,7 +548,7 @@ function populateDropdowns() {
   let empLiburOpts = '<option value="ALL">Semua Karyawan (Libur Nasional)</option>';
 
   if (GLOBAL_DATA.allKaryawanPublic) {
-    const isCabangScope = (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
+    const isCabangScope = CURRENT_USER && (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
     GLOBAL_DATA.allKaryawanPublic.forEach(e => {
       if (isCabangScope && String(e.id_cabang) !== String(CURRENT_USER.id_cabang)) return;
       empLiburOpts += `<option value="${e.id_karyawan}">${e.nama_lengkap} (${e.id_karyawan})</option>`;
@@ -488,7 +563,7 @@ function populateDropdowns() {
   let payCabOpts = '';
   let cfgCabOpts = '<option value="Semua">Semua Cabang (Global)</option>';
 
-  if (CURRENT_USER.role === 'Admin' || CURRENT_USER.role === 'HRD') {
+  if (CURRENT_USER && (CURRENT_USER.role === 'Admin' || CURRENT_USER.role === 'HRD')) {
     payCabOpts = '<option value="ALL">Semua Cabang</option>';
   }
 
@@ -511,7 +586,7 @@ function populateDropdowns() {
     const selectPayCab = document.getElementById('payCabangFilter');
     if (selectPayCab) {
       selectPayCab.innerHTML = payCabOpts;
-      if (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang') {
+      if (CURRENT_USER && (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang')) {
         selectPayCab.value = CURRENT_USER.id_cabang;
         selectPayCab.disabled = true;
       } else {
@@ -534,7 +609,7 @@ function showModalTambahJadwal() {
   const selectCabang = document.getElementById('genIdCabang');
   if (selectCabang) {
     let optsCabang = '';
-    const isCabangScope = (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
+    const isCabangScope = CURRENT_USER && (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
     
     (GLOBAL_DATA.cabang || []).forEach(c => {
       if (isCabangScope && String(c.id_cabang) !== String(CURRENT_USER.id_cabang)) return;
@@ -542,7 +617,7 @@ function showModalTambahJadwal() {
     });
     
     selectCabang.innerHTML = optsCabang;
-    selectCabang.value = CURRENT_USER.id_cabang || (GLOBAL_DATA.cabang[0] ? GLOBAL_DATA.cabang[0].id_cabang : '');
+    selectCabang.value = (CURRENT_USER ? CURRENT_USER.id_cabang : null) || (GLOBAL_DATA.cabang && GLOBAL_DATA.cabang[0] ? GLOBAL_DATA.cabang[0].id_cabang : '');
     if (isCabangScope) selectCabang.disabled = true;
     else selectCabang.disabled = false;
   }
@@ -561,7 +636,6 @@ function showModalTambahJadwal() {
   new bootstrap.Modal(document.getElementById('modalJadwal')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function buildMingguanRows() {
   const tglInput = document.getElementById('genTglMulai')?.value;
   const targetCabang = document.getElementById('genIdCabang')?.value;
@@ -583,9 +657,7 @@ async function buildMingguanRows() {
   container.innerHTML = `<tr><td colspan="6" class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div> Memuat susunan jadwal rutin per area...</td></tr>`;
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/jadwal-auto?id_cabang=${targetCabang}&tgl_mulai=${tglInput}`);
-    const res = await response.json();
-
+    const res = await apiFetch(`/api/jadwal/auto-populate?id_cabang=${targetCabang}&tgl_mulai=${tglInput}`);
     if (!res || res.status !== 'success') {
       alert('Gagal memuat draf jadwal rutin.');
       return;
@@ -630,7 +702,7 @@ async function buildMingguanRows() {
           </option>`;
         });
 
-        let nopolVal = draftItem.nopol_armada || area.armada_default || '';
+        let nopolVal = draftItem.nopol_armada || area.armada_default || area.nopol_default || '';
         let ketVal = draftItem.keterangan || (draftItem.is_auto_copied ? 'Salinan Minggu Lalu (Cek Ulang)' : '');
 
         htmlRows += `
@@ -669,7 +741,7 @@ async function buildMingguanRows() {
 
     container.innerHTML = htmlRows;
   } catch (err) {
-    alert("Gagal memuat jadwal: " + err.message);
+    alert("Gagal memuat draf jadwal rutin: " + err.message);
   }
 }
 
@@ -678,8 +750,8 @@ function autoFillNopolRow(selectEl) {
   const areaId = selectEl.value;
   const areaObj = (GLOBAL_DATA.area || []).find(a => String(a.id_area) === String(areaId));
   const nopolInput = row.querySelector('.input-nopol');
-  if (areaObj && areaObj.nopol_default && nopolInput) {
-    nopolInput.value = areaObj.nopol_default;
+  if (areaObj && (areaObj.nopol_default || areaObj.armada_default) && nopolInput) {
+    nopolInput.value = areaObj.nopol_default || areaObj.armada_default;
   }
 }
 
@@ -693,7 +765,6 @@ function checkLiburWarning(selectEl) {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleSaveJadwalMingguan(e) {
   e.preventDefault();
   
@@ -737,7 +808,7 @@ async function handleSaveJadwalMingguan(e) {
         id_jadwal: 'TEMP_' + Date.now() + '_' + index,
         tanggal: tgl,
         id_cabang: idCabang,
-        id_foreman: CURRENT_USER.id_karyawan,
+        id_foreman: CURRENT_USER ? CURRENT_USER.id_karyawan : 'ADMIN',
         id_sopir: id_sopir,
         id_kenek: id_kenek || '',
         id_gudang: '',
@@ -791,17 +862,15 @@ async function handleSaveJadwalMingguan(e) {
   const payload = {
     tgl_mulai: tglMulai,
     id_cabang: idCabang,
-    id_foreman: CURRENT_USER.id_karyawan,
+    id_foreman: CURRENT_USER ? CURRENT_USER.id_karyawan : 'ADMIN',
     daftar_penugasan: daftarPenugasan
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/jadwal-mingguan`, {
+    const res = await apiFetch('/api/jadwal/simpan-mingguan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await response.json();
     if (res && res.status === 'success') {
       showToast('✔️ Data tersinkronisasi sempurna ke Cloud Database.');
     } else {
@@ -817,8 +886,8 @@ async function handleSaveJadwalMingguan(e) {
 function autoFillNopolDefault(isEdit = false) {
   const areaId = document.getElementById(isEdit ? 'editJdwArea' : 'jdwArea').value;
   const areaObj = (GLOBAL_DATA.area || []).find(a => String(a.id_area) === String(areaId));
-  if (areaObj && areaObj.nopol_default) {
-    document.getElementById(isEdit ? 'editJdwNopol' : 'jdwNopol').value = areaObj.nopol_default;
+  if (areaObj && (areaObj.nopol_default || areaObj.armada_default)) {
+    document.getElementById(isEdit ? 'editJdwNopol' : 'jdwNopol').value = areaObj.nopol_default || areaObj.armada_default;
   }
 }
 
@@ -829,7 +898,7 @@ function openEditJadwalModal(idJadwal) {
   document.getElementById('editJdwId').value = jdw.id_jadwal;
   document.getElementById('editJdwTglText').innerText = formatDisplayDate(jdw.tanggal);
 
-  const targetCabang = jdw.id_cabang || CURRENT_USER.id_cabang;
+  const targetCabang = jdw.id_cabang || (CURRENT_USER ? CURRENT_USER.id_cabang : '');
 
   const filterEmployeeByCabang = (excludeIds = []) => {
     let opts = '<option value="">-- Pilih Karyawan --</option>';
@@ -854,13 +923,12 @@ function openEditJadwalModal(idJadwal) {
   document.getElementById('editJdwKenek').value = jdw.id_kenek || '';
   document.getElementById('editJdwGudang').value = jdw.id_gudang || '';
   document.getElementById('editJdwArea').value = jdw.id_area || '';
-  document.getElementById('editJdwNopol').value = jdw.nopol_armada || '';
+  document.getElementById('editJdwNopol').value = jdw.nopol_armada || jdw.nopol || '';
   document.getElementById('editJdwKet').value = jdw.keterangan || '';
 
   new bootstrap.Modal(document.getElementById('modalEditJadwal')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleEditJadwalSubmit(e) {
   e.preventDefault();
 
@@ -885,13 +953,10 @@ async function handleEditJadwalSubmit(e) {
   showToast('⚡ Perubahan jadwal langsung diterapkan!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/jadwal`, {
+    const res = await apiFetch(`/api/jadwal/update/${idJadwal}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedData)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') {
       showToast('✔️ Perubahan jadwal tersimpan di server.');
     } else {
@@ -904,7 +969,6 @@ async function handleEditJadwalSubmit(e) {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function deleteJadwal(idJadwal) {
   if (confirm('Hapus penugasan operasional ini?')) {
     if (GLOBAL_DATA.jadwal) {
@@ -915,8 +979,7 @@ async function deleteJadwal(idJadwal) {
     showToast('⚡ Jadwal berhasil dihapus!');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/jadwal/${idJadwal}`, { method: 'DELETE' });
-      const res = await response.json();
+      const res = await apiFetch(`/api/jadwal/delete/${idJadwal}`, { method: 'DELETE' });
       if (res && res.status === 'success') {
         showToast('✔️ Data terhapus permanen dari cloud.');
       } else {
@@ -934,32 +997,34 @@ function showModalTambahArea() {
   new bootstrap.Modal(document.getElementById('modalArea')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleSaveArea(e) {
   e.preventDefault();
   const data = {
     nama_area: document.getElementById('areaNama').value,
-    id_cabang: CURRENT_USER.id_cabang,
+    id_cabang: CURRENT_USER ? CURRENT_USER.id_cabang : 'CAB-001',
     nopol_default: document.getElementById('areaNopol').value
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/area`, {
+    const res = await apiFetch('/api/area/tambah', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
     alert(res.message);
     if (res.status === 'success') {
       bootstrap.Modal.getInstance(document.getElementById('modalArea')).hide();
       loadAppData();
     }
   } catch (err) {
-    alert("Error tambah area: " + err.message);
+    alert("Gagal menambahkan area: " + err.message);
   }
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * HISTORI ABSENSI & FILTERS
+ * ----------------------------------------------------------------------------
+ */
 function setupDefaultFilterHistori(data) {
   if (data.periodeMingguIni) {
     const filterStart = document.getElementById('filterHistoriStart');
@@ -967,15 +1032,31 @@ function setupDefaultFilterHistori(data) {
     if (filterStart && !filterStart.value) filterStart.value = data.periodeMingguIni.mulai;
     if (filterEnd && !filterEnd.value) filterEnd.value = data.periodeMingguIni.selesai;
   }
+
+  const selectCabang = document.getElementById('filterHistoriCabang');
+  if (selectCabang && selectCabang.options.length <= 1 && data.cabang) {
+    data.cabang.forEach(c => {
+      const opt = document.createElement('option');
+      opt.value = c.id_cabang;
+      opt.textContent = c.nama_cabang || c.id_cabang;
+      selectCabang.appendChild(opt);
+    });
+  }
 }
 
 function resetFilterHistori() {
   if (GLOBAL_DATA.periodeMingguIni) {
-    document.getElementById('filterHistoriStart').value = GLOBAL_DATA.periodeMingguIni.mulai;
-    document.getElementById('filterHistoriEnd').value = GLOBAL_DATA.periodeMingguIni.selesai;
+    if (document.getElementById('filterHistoriStart')) document.getElementById('filterHistoriStart').value = GLOBAL_DATA.periodeMingguIni.mulai;
+    if (document.getElementById('filterHistoriEnd')) document.getElementById('filterHistoriEnd').value = GLOBAL_DATA.periodeMingguIni.selesai;
+  } else {
+    if (document.getElementById('filterHistoriStart')) document.getElementById('filterHistoriStart').value = '';
+    if (document.getElementById('filterHistoriEnd')) document.getElementById('filterHistoriEnd').value = '';
   }
+
+  if (document.getElementById('filterHistoriCabang')) document.getElementById('filterHistoriCabang').value = 'ALL';
   const searchInput = document.getElementById('filterHistoriSearch');
   if (searchInput) searchInput.value = '';
+
   filterHistoriAbsen();
 }
 
@@ -984,9 +1065,9 @@ function filterHistoriAbsen() {
 }
 
 function exportPresensiCSV() {
-  const isSuperAdmin = (CURRENT_USER.role === 'Admin');
-  const isHRD = (CURRENT_USER.role === 'HRD');
-  const isAdminCabang = (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
+  const isSuperAdmin = CURRENT_USER && (CURRENT_USER.role === 'Admin');
+  const isHRD = CURRENT_USER && (CURRENT_USER.role === 'HRD');
+  const isAdminCabang = CURRENT_USER && (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
   const isManagement = (isSuperAdmin || isHRD || isAdminCabang);
 
   const filterStartVal = document.getElementById('filterHistoriStart')?.value;
@@ -1073,7 +1154,14 @@ function generateAbsenStatusBadge(absenObj, izinObj, isLiburDay, isPastDate, isT
   }
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * TABLE RENDERING ENGINE
+ * ----------------------------------------------------------------------------
+ */
 function renderAllTables() {
+  if (!CURRENT_USER) return;
+  
   const isSuperAdmin = (CURRENT_USER.role === 'Admin');
   const isHRD = (CURRENT_USER.role === 'HRD');
   const isAdminCabang = (CURRENT_USER.role === 'Admin Cabang' || CURRENT_USER.role === 'Staf Admin Cabang');
@@ -1089,6 +1177,7 @@ function renderAllTables() {
   const todayStr = formatDisplayDate(new Date());
   const hariIndo = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
+  // 1. RIWAYAT ABSEN SAYA
   let htmlSaya = '';
   if (GLOBAL_DATA.periodeMingguIni) {
     const pStart = GLOBAL_DATA.periodeMingguIni.mulai;
@@ -1137,18 +1226,28 @@ function renderAllTables() {
     document.getElementById('tabelRiwayatAbsenSaya').innerHTML = htmlSaya || `<tr><td colspan="4" class="text-center">Belum ada data.</td></tr>`;
   }
 
+  // 2. FILTERING PRESENSI ADMIN
   const filterStartVal = document.getElementById('filterHistoriStart')?.value;
   const filterEndVal = document.getElementById('filterHistoriEnd')?.value;
-  const searchText = (document.getElementById('filterHistoriSearch')?.value || '').toLowerCase();
+  const filterCabangVal = document.getElementById('filterHistoriCabang')?.value || 'ALL';
+  const searchText = (document.getElementById('filterHistoriSearch')?.value || '').toLowerCase().trim();
 
   let filteredAbsen = (GLOBAL_DATA.absensi || []).filter(a => {
     const tglStr = formatDisplayDate(a.tanggal);
     if (filterStartVal && tglStr < filterStartVal) return false;
     if (filterEndVal && tglStr > filterEndVal) return false;
 
-    let empFound = (GLOBAL_DATA.allKaryawanPublic || []).find(e => String(e.id_karyawan) === String(a.id_karyawan));
+    let empFound = (GLOBAL_DATA.allKaryawanPublic || GLOBAL_DATA.karyawan || []).find(e => String(e.id_karyawan) === String(a.id_karyawan));
     let empNameText = empFound ? empFound.nama_lengkap : String(a.id_karyawan);
 
+    // Filter Cabang
+    if (filterCabangVal !== 'ALL' && filterCabangVal !== '' && filterCabangVal !== 'undefined') {
+      let empCabang = String(a.tb_cabang || a.cabang || (empFound ? (empFound.tb_cabang || empFound.id_cabang || empFound.cabang) : '') || '').toLowerCase().trim();
+      let targetCabang = String(filterCabangVal).toLowerCase().trim();
+      if (empCabang !== targetCabang && !empCabang.includes(targetCabang)) return false;
+    }
+
+    // Filter Pencarian Teks
     if (searchText !== '') {
       const matchName = empNameText.toLowerCase().includes(searchText);
       const matchId = String(a.id_karyawan).toLowerCase().includes(searchText);
@@ -1159,6 +1258,7 @@ function renderAllTables() {
 
   renderTabelHistoriPresensiAdmin(filteredAbsen);
 
+  // 3. JADWAL DISTRIBUSI
   let htmlJdw = '';
   if (GLOBAL_DATA.jadwal && Array.isArray(GLOBAL_DATA.jadwal)) {
     const today = new Date();
@@ -1191,7 +1291,7 @@ function renderAllTables() {
         <td>${getEmpName(j.id_sopir)}</td>
         <td>${getEmpName(j.id_kenek)}</td>
         <td>${j.id_gudang ? getEmpName(j.id_gudang) : '<span class="text-muted small">-</span>'}</td>
-        <td><span class="badge bg-secondary">${j.nopol_armada}</span></td>
+        <td><span class="badge bg-secondary">${j.nopol_armada || j.nopol || '-'}</span></td>
         <td><small>${j.keterangan || '-'}</small></td>
         <td>${actionBtn}</td>
       </tr>`;
@@ -1202,16 +1302,18 @@ function renderAllTables() {
     document.getElementById('tabelJadwalDistribusi').innerHTML = htmlJdw || '<tr><td colspan="8" class="text-center">Belum ada penjadwalan operasional untuk minggu berjalan ini.</td></tr>';
   }
 
+  // 4. AREA DISTRIBUSI
   let htmlArea = '';
   if (GLOBAL_DATA.area && Array.isArray(GLOBAL_DATA.area)) {
     GLOBAL_DATA.area.forEach(ar => {
-      htmlArea += `<tr><td><b>${ar.id_area}</b></td><td>${ar.nama_area}</td><td>${ar.id_cabang}</td><td><span class="badge bg-secondary">${ar.nopol_default || '-'}</span></td></tr>`;
+      htmlArea += `<tr><td><b>${ar.id_area}</b></td><td>${ar.nama_area}</td><td>${ar.id_cabang}</td><td><span class="badge bg-secondary">${ar.nopol_default || ar.armada_default || '-'}</span></td></tr>`;
     });
   }
   if (document.getElementById('tabelAreaDistribusi')) {
     document.getElementById('tabelAreaDistribusi').innerHTML = htmlArea || '<tr><td colspan="4" class="text-center">Belum ada master area.</td></tr>';
   }
 
+  // 5. TUKAR LIBUR
   let htmlT = '';
   if (GLOBAL_DATA.tukarLibur && Array.isArray(GLOBAL_DATA.tukarLibur)) {
     GLOBAL_DATA.tukarLibur.forEach(tk => {
@@ -1229,6 +1331,7 @@ function renderAllTables() {
     document.getElementById('tabelRiwayatTukarLibur').innerHTML = htmlT || '<tr><td colspan="7" class="text-center">Belum ada riwayat pengajuan tukar libur.</td></tr>';
   }
 
+  // 6. IZIN
   let htmlI = '';
   if (GLOBAL_DATA.izin && Array.isArray(GLOBAL_DATA.izin)) {
     GLOBAL_DATA.izin.forEach(iz => {
@@ -1242,6 +1345,7 @@ function renderAllTables() {
     document.getElementById('tabelRiwayatIzin').innerHTML = htmlI || `<tr><td colspan="6" class="text-center">Belum ada riwayat izin.</td></tr>`;
   }
 
+  // 7. KARYAWAN & CABANG
   if (document.getElementById('tabelKaryawan') && GLOBAL_DATA.karyawan) {
     let htmlK = '';
     GLOBAL_DATA.karyawan.forEach(k => {
@@ -1255,20 +1359,21 @@ function renderAllTables() {
     let htmlC = '';
     GLOBAL_DATA.cabang.forEach(c => {
       let actionBtn = isSuperAdmin ? `<button class="btn btn-sm btn-outline-primary" onclick="openEditCabangModal('${c.id_cabang}')">Edit</button>` : '-';
-      htmlC += `<tr><td><b>${c.id_cabang}</b></td><td>${c.nama_cabang}</td><td>${c.latitude}</td><td>${c.longitude}</td><td>${c.radius_meter} meter</td><td>${actionBtn}</td></tr>`;
+      htmlC += `<tr><td><b>${c.id_cabang}</b></td><td>${c.nama_cabang}</td><td>${c.latitude}</td><td>${c.longitude}</td><td>${c.radius_meter || c.radius} meter</td><td>${actionBtn}</td></tr>`;
     });
     document.getElementById('tabelCabang').innerHTML = htmlC;
   }
 
   renderTableACC();
 
+  // 8. KASBON
   if (document.getElementById('tabelKasbon') && GLOBAL_DATA.kasbon) {
     let htmlKas = '';
     GLOBAL_DATA.kasbon.forEach(ks => {
       let kName = getEmpName(ks.id_karyawan);
       let nomAwal = Number(ks.nominal || 0);
       let totalCicilan = Number(ks.bayar_cicilan || 0);
-      let sisaKas = ks.sisa_kasbon !== '' ? Number(ks.sisa_kasbon) : (nomAwal - totalCicilan);
+      let sisaKas = ks.sisa_kasbon !== undefined && ks.sisa_kasbon !== '' ? Number(ks.sisa_kasbon) : (nomAwal - totalCicilan);
       htmlKas += `<tr><td><b>${ks.id_kasbon}</b></td><td>${kName}</td><td>${formatDisplayDate(ks.tanggal)}</td><td>Rp ${nomAwal.toLocaleString()}</td><td class="text-success fw-bold">Rp ${totalCicilan.toLocaleString()}</td><td class="text-danger fw-bold">Rp ${sisaKas.toLocaleString()}</td><td>${ks.keterangan || '-'}</td><td><span class="badge ${ks.status === 'Lunas' ? 'bg-success' : 'bg-warning text-dark'}">${ks.status}</span></td></tr>`;
     });
     document.getElementById('tabelKasbon').innerHTML = htmlKas;
@@ -1278,12 +1383,15 @@ function renderAllTables() {
   renderTabelJadwal();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
+/**
+ * ----------------------------------------------------------------------------
+ * USER & CABANG MANAGEMENT LOGIC
+ * ----------------------------------------------------------------------------
+ */
 async function showRegisterModal() {
   new bootstrap.Modal(document.getElementById('modalRegister')).show();
   try {
-    const response = await fetch(`${API_BASE_URL}/api/cabang-public`);
-    const cabangList = await response.json();
+    const cabangList = await apiFetch('/api/cabang/public-list');
     let opts = '<option value="">-- Pilih Cabang Tugas --</option>';
     if (cabangList && cabangList.length > 0) {
       cabangList.forEach(c => { opts += `<option value="${c.id_cabang}">${c.nama_cabang}</option>`; });
@@ -1294,7 +1402,6 @@ async function showRegisterModal() {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleRegister(e) {
   e.preventDefault();
   const data = {
@@ -1308,16 +1415,14 @@ async function handleRegister(e) {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/register`, {
+    const res = await apiFetch('/api/karyawan/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
     alert(res.message);
     if (res.status === 'success') bootstrap.Modal.getInstance(document.getElementById('modalRegister')).hide();
   } catch (err) {
-    alert("Error pendaftaran: " + err.message);
+    alert("Gagal registrasi karyawan: " + err.message);
   }
 }
 
@@ -1329,7 +1434,7 @@ function showTukarLiburModal() {
   let rekanOpts = '<option value="">-- Pilih Rekan Kerja --</option>';
   if (GLOBAL_DATA.allKaryawanPublic) {
     GLOBAL_DATA.allKaryawanPublic.forEach(k => {
-      if (String(k.id_karyawan) !== String(CURRENT_USER.id_karyawan)) {
+      if (CURRENT_USER && String(k.id_karyawan) !== String(CURRENT_USER.id_karyawan)) {
         rekanOpts += `<option value="${k.id_karyawan}">${k.nama_lengkap} (${k.id_karyawan})</option>`;
       }
     });
@@ -1338,7 +1443,6 @@ function showTukarLiburModal() {
   new bootstrap.Modal(document.getElementById('modalTukarLibur')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleFormTukarLibur(e) {
   e.preventDefault();
 
@@ -1350,7 +1454,7 @@ async function handleFormTukarLibur(e) {
 
   const data = {
     id_tukar: 'TKR_' + Date.now(),
-    id_pemohon: CURRENT_USER.id_karyawan,
+    id_pemohon: CURRENT_USER ? CURRENT_USER.id_karyawan : '',
     tgl_pemohon: document.getElementById('tukarTglPemohon').value,
     id_pengganti: document.getElementById('tukarIdPengganti').value,
     tgl_pengganti: document.getElementById('tukarTglPengganti').value,
@@ -1375,13 +1479,10 @@ async function handleFormTukarLibur(e) {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/tukar-libur`, {
+    const res = await apiFetch('/api/tukar-libur/ajukan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
-
     if (btnSubmit) {
       btnSubmit.disabled = false;
       btnSubmit.innerHTML = 'Kirim Pengajuan';
@@ -1414,7 +1515,6 @@ function showIzinModal() {
   new bootstrap.Modal(document.getElementById('modalIzin')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleFormIzin(e) {
   e.preventDefault();
   if (GLOBAL_DATA.statusAbsen === 'SUDAH_CHECKIN' || GLOBAL_DATA.statusAbsen === 'SUDAH_CHECKOUT') {
@@ -1423,7 +1523,7 @@ async function handleFormIzin(e) {
 
   const data = {
     id_izin: 'IZN_' + Date.now(),
-    id_karyawan: CURRENT_USER.id_karyawan,
+    id_karyawan: CURRENT_USER ? CURRENT_USER.id_karyawan : '',
     tgl_mulai: document.getElementById('izinStart').value,
     tgl_selesai: document.getElementById('izinEnd').value,
     jenis: document.getElementById('izinJenis').value,
@@ -1439,18 +1539,14 @@ async function handleFormIzin(e) {
   showToast('⚡ Pengajuan izin dikirim!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/izin`, {
+    const res = await apiFetch('/api/izin/ajukan', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Pengajuan izin tercatat.');
     else { showToast('⚠️ ' + (res ? res.message : 'Error'), 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Terjadi kesalahan server!', 'danger');
-    loadAppData();
+    showToast('❌ Terjadi kesalahan server!', 'danger'); loadAppData();
   }
 }
 
@@ -1485,7 +1581,6 @@ function openEditKaryawanModal(id) {
   new bootstrap.Modal(document.getElementById('modalEditKaryawan')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleEditKaryawanSubmit(e) {
   e.preventDefault();
   const idEmp = document.getElementById('editEmpId').value;
@@ -1495,6 +1590,7 @@ async function handleEditKaryawanSubmit(e) {
 
   const updatedData = {
     id_karyawan: idEmp,
+    nama_lengkap: document.getElementById('editEmpNama').value,
     nama: document.getElementById('editEmpNama').value,
     posisi: document.getElementById('editEmpPosisi').value,
     tb_cabang: selectedCabang,
@@ -1519,22 +1615,17 @@ async function handleEditKaryawanSubmit(e) {
   showToast('⚡ Data karyawan berhasil diperbarui!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/karyawan`, {
+    const res = await apiFetch(`/api/karyawan/update/${idEmp}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedData)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔ Update karyawan tersimpan.');
     else { showToast('⚠️ Gagal update: ' + (res ? res.message : 'Unknown error'), 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Gagal terhubung ke server!', 'danger');
-    loadAppData();
+    showToast('❌ Gagal terhubung ke server!', 'danger'); loadAppData();
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function saveKaryawan(e) {
   e.preventDefault();
 
@@ -1574,18 +1665,14 @@ async function saveKaryawan(e) {
   showToast('⚡ Data karyawan berhasil ditambahkan!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/karyawan`, {
+    const res = await apiFetch('/api/karyawan/tambah', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Karyawan tersimpan di cloud database.');
     else { showToast('⚠️ Gagal simpan karyawan: ' + res.message, 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Kesalahan jaringan!', 'danger');
-    loadAppData();
+    showToast('❌ Kesalahan jaringan!', 'danger'); loadAppData();
   }
 }
 
@@ -1597,12 +1684,11 @@ function openEditCabangModal(id) {
   document.getElementById('editCabNama').value = cab.nama_cabang;
   document.getElementById('editCabLat').value = cab.latitude;
   document.getElementById('editCabLong').value = cab.longitude;
-  document.getElementById('editCabRadius').value = cab.radius_meter;
+  document.getElementById('editCabRadius').value = cab.radius_meter || cab.radius || 100;
 
   new bootstrap.Modal(document.getElementById('modalEditCabang')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleEditCabangSubmit(e) {
   e.preventDefault();
   const idCab = document.getElementById('editCabId').value;
@@ -1611,7 +1697,8 @@ async function handleEditCabangSubmit(e) {
     nama_cabang: document.getElementById('editCabNama').value,
     latitude: document.getElementById('editCabLat').value,
     longitude: document.getElementById('editCabLong').value,
-    radius: document.getElementById('editCabRadius').value
+    radius: document.getElementById('editCabRadius').value,
+    radius_meter: document.getElementById('editCabRadius').value
   };
 
   const idx = (GLOBAL_DATA.cabang || []).findIndex(c => String(c.id_cabang) === String(idCab));
@@ -1623,22 +1710,17 @@ async function handleEditCabangSubmit(e) {
   showToast('⚡ Data cabang berhasil diperbarui!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/cabang`, {
+    const res = await apiFetch(`/api/cabang/update/${idCab}`, {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(updatedData)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Perubahan cabang tersimpan.');
     else { showToast('⚠️ Gagal update cabang: ' + res.message, 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Terjadi kesalahan koneksi!', 'danger');
-    loadAppData();
+    showToast('❌ Terjadi kesalahan koneksi!', 'danger'); loadAppData();
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function saveCabang(e) {
   e.preventDefault();
   const data = {
@@ -1646,7 +1728,8 @@ async function saveCabang(e) {
     nama_cabang: document.getElementById('cabNama').value,
     latitude: document.getElementById('cabLat').value,
     longitude: document.getElementById('cabLong').value,
-    radius: document.getElementById('cabRadius').value
+    radius: document.getElementById('cabRadius').value,
+    radius_meter: document.getElementById('cabRadius').value
   };
 
   if (!GLOBAL_DATA.cabang) GLOBAL_DATA.cabang = [];
@@ -1658,18 +1741,14 @@ async function saveCabang(e) {
   showToast('⚡ Master Cabang berhasil ditambahkan!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/cabang`, {
+    const res = await apiFetch('/api/cabang/tambah', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Cabang tersimpan di database.');
     else { showToast('⚠️ Gagal simpan cabang: ' + res.message, 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Gagal terhubung ke server!', 'danger');
-    loadAppData();
+    showToast('❌ Gagal terhubung ke server!', 'danger'); loadAppData();
   }
 }
 
@@ -1683,7 +1762,6 @@ function openEditIzinModal(id) {
   new bootstrap.Modal(document.getElementById('modalEditIzin')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function handleEditIzinSubmit(e) {
   e.preventDefault();
   const idIzin = document.getElementById('editIzinId').value;
@@ -1703,21 +1781,22 @@ async function handleEditIzinSubmit(e) {
   showToast(`⚡ Status perizinan diubah menjadi ${newStatus}!`);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/izin/status`, {
+    const res = await apiFetch('/api/izin/update-status', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id_izin: idIzin, status: newStatus })
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Status perizinan tersimpan.');
     else { showToast('⚠️ Gagal update status!', 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Kesalahan jaringan!', 'danger');
-    loadAppData();
+    showToast('❌ Kesalahan jaringan!', 'danger'); loadAppData();
   }
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * ACC & APPROVAL MANAGEMENT
+ * ----------------------------------------------------------------------------
+ */
 function renderTableACC() {
   const containerIzin = document.getElementById('tbodyACC_Izin');
   const containerTukar = document.getElementById('tbodyACC_Tukar');
@@ -1782,8 +1861,8 @@ function renderTableACC() {
       const alasan = tk.alasan || tk[5] || '-';
       const status = tk.status || tk[6] || 'Menunggu Persetujuan';
 
-      const isPengganti = String(idPengganti).trim() === String(CURRENT_USER.id_karyawan).trim();
-      const isManagement = (CURRENT_USER.role === 'Admin' || CURRENT_USER.role === 'HRD' || CURRENT_USER.role === 'Admin Cabang');
+      const isPengganti = CURRENT_USER && String(idPengganti).trim() === String(CURRENT_USER.id_karyawan).trim();
+      const isManagement = CURRENT_USER && (CURRENT_USER.role === 'Admin' || CURRENT_USER.role === 'HRD' || CURRENT_USER.role === 'Admin Cabang');
       
       if (isPengganti && status === 'Menunggu Persetujuan') {
         pendingCountForMe++;
@@ -1828,7 +1907,6 @@ function renderTableACC() {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function prosesACC_Izin(idIzin, newStatus) {
   const idx = (GLOBAL_DATA.izin || []).findIndex(i => String(i.id_izin || i[0]) === String(idIzin));
   if (idx !== -1) {
@@ -1843,13 +1921,10 @@ async function prosesACC_Izin(idIzin, newStatus) {
   showToast(`⚡ Pengajuan izin ${idIzin} di-set ${newStatus}!`);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/izin/acc`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await apiFetch('/api/izin/acc', {
+      method: 'POST',
       body: JSON.stringify({ id_izin: idIzin, status: newStatus })
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') {
       showToast(`✔️ Status izin berhasil tersimpan di cloud.`);
     } else {
@@ -1862,7 +1937,6 @@ async function prosesACC_Izin(idIzin, newStatus) {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function prosesACC_Tukar(idTukar, newStatus) {
   const idx = (GLOBAL_DATA.tukarLibur || []).findIndex(t => String(t.id_tukar || t[0]) === String(idTukar));
   if (idx !== -1) {
@@ -1877,13 +1951,10 @@ async function prosesACC_Tukar(idTukar, newStatus) {
   showToast(`⚡ Pengajuan tukar libur ${idTukar} di-set ${newStatus}!`);
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/tukar-libur/acc`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await apiFetch('/api/tukar-libur/respon', {
+      method: 'POST',
       body: JSON.stringify({ id_tukar: idTukar, status: newStatus })
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') {
       showToast(`✔️ Status tukar libur tersimpan di cloud.`);
     } else {
@@ -1896,7 +1967,11 @@ async function prosesACC_Tukar(idTukar, newStatus) {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
+/**
+ * ----------------------------------------------------------------------------
+ * KASBON LOGIC
+ * ----------------------------------------------------------------------------
+ */
 async function saveKasbon(e) {
   e.preventDefault();
   const empId = document.getElementById('kasbonEmpId').value;
@@ -1925,28 +2000,28 @@ async function saveKasbon(e) {
   showToast('⚡ Transaksi kasbon berhasil dicatat!');
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/kasbon`, {
+    const res = await apiFetch('/api/kasbon/tambah', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         id_karyawan: empId,
         nominal: nom,
         keterangan: ket,
-        created_by: CURRENT_USER.id_karyawan,
-        role: CURRENT_USER.role
+        created_by: CURRENT_USER ? CURRENT_USER.id_karyawan : 'ADMIN',
+        role_creator: CURRENT_USER ? CURRENT_USER.role : 'Admin'
       })
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') showToast('✔️ Kasbon tersimpan di server.');
     else { showToast('⚠️ Gagal kasbon: ' + res.message, 'danger'); loadAppData(); }
   } catch (err) {
-    showToast('❌ Gagal terhubung!', 'danger');
-    loadAppData();
+    showToast('❌ Gagal terhubung!', 'danger'); loadAppData();
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
+/**
+ * ----------------------------------------------------------------------------
+ * PAYROLL ENGINE
+ * ----------------------------------------------------------------------------
+ */
 async function kalkulasiPayroll() {
   const elStart = document.getElementById('payStart');
   const elEnd = document.getElementById('payEnd');
@@ -1969,9 +2044,7 @@ async function kalkulasiPayroll() {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/payroll/hitung?start=${start}&end=${end}&cabang=${selectedCabang}`);
-    const res = await response.json();
-
+    const res = await apiFetch(`/api/payroll/kalkulasi?tgl_mulai=${start}&tgl_selesai=${end}&id_cabang=${selectedCabang}`);
     if (btnKalkulasi) {
       btnKalkulasi.disabled = false;
       btnKalkulasi.innerHTML = 'Hitung Rekap Payroll';
@@ -2109,12 +2182,12 @@ function updateRowPayrollManual(index) {
   updateRowPayroll(index);
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function prosesSimpanPayroll() {
   const start = document.getElementById('payStart')?.value;
   const end = document.getElementById('payEnd')?.value;
-  const dataPayroll = window.TEMP_PAYROLL || [];
   const btnSimpan = document.getElementById('btnSimpanPay');
+
+  const dataPayroll = window.TEMP_PAYROLL || [];
 
   if (!dataPayroll || dataPayroll.length === 0) {
     alert("Tidak ada hasil perhitungan payroll untuk disimpan!");
@@ -2124,16 +2197,18 @@ async function prosesSimpanPayroll() {
   if (confirm('Simpan rekap payroll ini? Potongan kasbon yang diinput akan otomatis mengurangi sisa pinjaman karyawan.')) {
     if (btnSimpan) {
       btnSimpan.disabled = true;
-      btnSimpan.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Menyimpan...';
+      btnSimpan.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Menyimpan & Menyiapkan PDF...';
     }
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/payroll/simpan`, {
+      const res = await apiFetch('/api/payroll/simpan', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start, end, dataPayroll })
+        body: JSON.stringify({
+          tgl_mulai: start,
+          tgl_selesai: end,
+          data_payroll: dataPayroll
+        })
       });
-      const res = await response.json();
 
       if (btnSimpan) {
         btnSimpan.disabled = false;
@@ -2143,10 +2218,30 @@ async function prosesSimpanPayroll() {
 
       if (res && res.status === 'success') {
         alert(res.message || 'Payroll berhasil disimpan!');
-        if (res.dataPayroll) {
+
+        if (res.dataPayroll && res.dataPayroll.length > 0) {
           window.TEMP_PAYROLL = res.dataPayroll;
         }
+
         renderTabelPayroll();
+
+        const elCabang = document.getElementById('payCabang') || document.getElementById('filterPayCabang');
+        const namaCabang = (elCabang && elCabang.selectedIndex >= 0) ? elCabang.options[elCabang.selectedIndex].text : 'Semua Cabang';
+
+        const payloadSave = {
+          tgl_mulai: start,
+          tgl_selesai: end,
+          nama_cabang: namaCabang
+        };
+
+        setTimeout(() => {
+          if (typeof generateAndDownloadPayrollPDF === 'function') {
+            generateAndDownloadPayrollPDF(payloadSave);
+          } else {
+            console.error("Fungsi generateAndDownloadPayrollPDF tidak ditemukan!");
+          }
+        }, 100);
+
       } else {
         alert('Gagal menyimpan: ' + (res ? res.message : 'Respon server kosong'));
       }
@@ -2161,7 +2256,11 @@ async function prosesSimpanPayroll() {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
+/**
+ * ----------------------------------------------------------------------------
+ * SETTINGS & CONFIGURATIONS
+ * ----------------------------------------------------------------------------
+ */
 async function saveSettings(e) {
   e.preventDefault();
   const settingsData = {
@@ -2173,16 +2272,14 @@ async function saveSettings(e) {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/settings`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+    const res = await apiFetch('/api/settings/update', {
+      method: 'POST',
       body: JSON.stringify(settingsData)
     });
-    const res = await response.json();
     alert(res.message);
     loadAppData();
   } catch (err) {
-    alert("Error update pengaturan: " + err.message);
+    alert("Gagal menyimpan pengaturan: " + err.message);
   }
 }
 
@@ -2228,7 +2325,7 @@ function renderPermintaanTukarKaryawan() {
     const idPengganti = tk.id_pengganti || tk[3];
     const status = tk.status || tk[6] || 'Menunggu Persetujuan';
 
-    return String(idPengganti).trim() === String(CURRENT_USER.id_karyawan).trim() && status === 'Menunggu Persetujuan';
+    return CURRENT_USER && String(idPengganti).trim() === String(CURRENT_USER.id_karyawan).trim() && status === 'Menunggu Persetujuan';
   });
 
   if (requestsForMe.length === 0) {
@@ -2314,8 +2411,9 @@ function renderCheckboxKaryawanByCabang() {
 }
 
 function toggleScopeKaryawan() {
-  const tipe = document.getElementById('cfgTargetTipe').value;
+  const tipe = document.getElementById('cfgTargetTipe')?.value;
   const box = document.getElementById('boxKaryawanKhusus');
+  if (!box) return;
   if (tipe === 'Khusus') {
     box.classList.remove('d-none');
     renderCheckboxKaryawanKhusus();
@@ -2328,7 +2426,7 @@ function renderCheckboxKaryawanKhusus() {
   const store = (typeof GLOBAL_DATA !== 'undefined' && GLOBAL_DATA) ? GLOBAL_DATA : (window.GLOBAL_DATA || {});
   const listKaryawan = store.karyawan || store.tb_karyawan || [];
   const cfg = store.configGaji || {};
-  const selectedCabang = document.getElementById('cfgTargetCabang').value;
+  const selectedCabang = document.getElementById('cfgTargetCabang') ? document.getElementById('cfgTargetCabang').value : 'Semua';
 
   let selectedKhusus = [];
   if (Array.isArray(cfg.karyawanKhusus)) {
@@ -2365,7 +2463,8 @@ function renderCheckboxKaryawanKhusus() {
     });
   }
 
-  document.getElementById('listKaryawanKhususCheck').innerHTML = html;
+  const container = document.getElementById('listKaryawanKhususCheck');
+  if (container) container.innerHTML = html;
 }
 
 function loadPengaturanGajiToForm() {
@@ -2414,9 +2513,8 @@ function loadRuleUmumByCabang() {
   if (document.getElementById('cfgNominalUangMakan')) document.getElementById('cfgNominalUangMakan').value = nominalUangMakan;
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function savePengaturanGaji(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
 
   const selectedCabang = document.getElementById('cfgCabangRuleUmum') ? document.getElementById('cfgCabangRuleUmum').value : 'Semua';
   const jamOvertime = document.getElementById('cfgJamOvertime') ? document.getElementById('cfgJamOvertime').value : '17:30';
@@ -2439,12 +2537,10 @@ async function savePengaturanGaji(e) {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/pengaturan/rule-umum`, {
+    const res = await apiFetch('/api/settings/rule-umum', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await response.json();
 
     if (btn) {
       btn.disabled = false;
@@ -2459,7 +2555,11 @@ async function savePengaturanGaji(e) {
 
     renderSummaryPengaturan();
 
-    showToast(`✅ Rule payroll cabang [${selectedCabang}] berhasil disimpan!`);
+    if (typeof showToast === 'function') {
+      showToast(`✅ Rule payroll cabang [${selectedCabang}] berhasil disimpan!`);
+    } else {
+      alert(`✅ Rule payroll cabang [${selectedCabang}] berhasil disimpan!`);
+    }
   } catch (err) {
     if (btn) {
       btn.disabled = false;
@@ -2469,19 +2569,22 @@ async function savePengaturanGaji(e) {
   }
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function savePengaturanInsentifKhusus(e) {
-  e.preventDefault();
+  if (e) e.preventDefault();
+
+  const elSelectCabang = document.getElementById('cfgCabangInsentifKhusus');
+  const selectedCabang = elSelectCabang ? elSelectCabang.value : 'Semua';
 
   const checkboxes = document.querySelectorAll('.chk-insentif-khusus:checked');
   let arrayKaryawanKhusus = [];
   checkboxes.forEach(chk => arrayKaryawanKhusus.push(chk.value));
 
   const payload = {
-    nominalInsentifKhusus: document.getElementById('cfgNominalInsentifKhusus') ? document.getElementById('cfgNominalInsentifKhusus').value : 0,
-    minHadirKhusus: document.getElementById('cfgMinHadirKhusus') ? document.getElementById('cfgMinHadirKhusus').value : 5,
-    potonganTerlambat: document.getElementById('cfgPotonganTerlambat') ? document.getElementById('cfgPotonganTerlambat').value : 0,
-    bonusFull7Hari: document.getElementById('cfgBonusFull7Hari') ? document.getElementById('cfgBonusFull7Hari').value : 0,
+    id_cabang: selectedCabang,
+    nominalInsentifKhusus: document.getElementById('cfgNominalInsentifKhusus') ? Number(document.getElementById('cfgNominalInsentifKhusus').value || 0) : 0,
+    minHadirKhusus: document.getElementById('cfgMinHadirKhusus') ? Number(document.getElementById('cfgMinHadirKhusus').value || 5) : 5,
+    potonganTerlambat: document.getElementById('cfgPotonganTerlambat') ? Number(document.getElementById('cfgPotonganTerlambat').value || 0) : 0,
+    bonusFull7Hari: document.getElementById('cfgBonusFull7Hari') ? Number(document.getElementById('cfgBonusFull7Hari').value || 0) : 0,
     karyawanKhusus: arrayKaryawanKhusus.join(',')
   };
 
@@ -2492,27 +2595,32 @@ async function savePengaturanInsentifKhusus(e) {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/pengaturan/insentif-khusus`, {
+    const res = await apiFetch('/api/settings/insentif-khusus', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await response.json();
 
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-save"></i> Simpan Rule & Daftar Insentif Khusus';
     }
 
-    if (!GLOBAL_DATA.configGajiPerCabang) GLOBAL_DATA.configGajiPerCabang = {};
-    GLOBAL_DATA.configGajiPerCabang['nominalInsentifKhusus'] = payload.nominalInsentifKhusus;
-    GLOBAL_DATA.configGajiPerCabang['minHadirKhusus'] = payload.minHadirKhusus;
-    GLOBAL_DATA.configGajiPerCabang['potonganTerlambat'] = payload.potonganTerlambat;
-    GLOBAL_DATA.configGajiPerCabang['bonusFull7Hari'] = payload.bonusFull7Hari;
-    GLOBAL_DATA.configGajiPerCabang['karyawanKhusus'] = payload.karyawanKhusus;
+    const store = (typeof GLOBAL_DATA !== 'undefined' && GLOBAL_DATA) ? GLOBAL_DATA : (window.GLOBAL_DATA || {});
+    if (!store.configGajiPerCabang) store.configGajiPerCabang = {};
+    
+    store.configGajiPerCabang['nominalInsentifKhusus_' + selectedCabang] = payload.nominalInsentifKhusus;
+    store.configGajiPerCabang['karyawanKhusus_' + selectedCabang] = payload.karyawanKhusus;
+    store.configGajiPerCabang['minHadirKhusus'] = payload.minHadirKhusus;
+    store.configGajiPerCabang['potonganTerlambat'] = payload.potonganTerlambat;
+    store.configGajiPerCabang['bonusFull7Hari'] = payload.bonusFull7Hari;
 
     renderSummaryPengaturan();
-    showToast('✅ Aturan & daftar penerima insentif khusus berhasil disimpan!');
+
+    if (typeof showToast === 'function') {
+      showToast(`✅ Aturan insentif khusus cabang ${selectedCabang} berhasil disimpan!`);
+    } else {
+      alert(`✅ Aturan insentif khusus cabang ${selectedCabang} berhasil disimpan!`);
+    }
   } catch (err) {
     if (btn) {
       btn.disabled = false;
@@ -2530,17 +2638,21 @@ function renderListKaryawanInsentifKhusus() {
   const elSelectCabang = document.getElementById('cfgCabangInsentifKhusus');
   const selectedCabang = elSelectCabang ? elSelectCabang.value : 'Semua';
 
+  const rawKhusus = config['karyawanKhusus_' + selectedCabang] || config['karyawanKhusus_Semua'] || config['karyawanKhusus'] || '';
   let selectedKhusus = [];
-  const rawKhusus = config.karyawanKhusus || config['karyawanKhusus'] || '';
   if (Array.isArray(rawKhusus)) {
     selectedKhusus = rawKhusus.map(id => String(id).trim());
   } else if (typeof rawKhusus === 'string') {
     selectedKhusus = rawKhusus.split(',').map(id => id.trim());
   }
 
+  const nominalCabang = config['nominalInsentifKhusus_' + selectedCabang] || config['nominalInsentifKhusus_Semua'] || config['nominalInsentifKhusus'] || 0;
+  const elInpNominal = document.getElementById('cfgNominalInsentifKhusus');
+  if (elInpNominal) elInpNominal.value = nominalCabang;
+
   const filteredEmp = listKaryawan.filter(emp => {
     if (String(emp.status || '').toLowerCase() !== 'aktif') return false;
-    if (selectedCabang !== 'Semua') {
+    if (selectedCabang !== 'Semua' && selectedCabang !== 'ALL') {
       const empCab = String(emp.id_cabang || emp.tb_cabang || '').trim();
       return empCab === selectedCabang;
     }
@@ -2577,7 +2689,7 @@ function renderSummaryPengaturan() {
   const configMap = store.configGajiPerCabang || store.configMap || {};
 
   let htmlRule = '';
-  const jOverGlobal = cleanJamOvertime(configMap['jamOvertime_Semua'] || configMap['jamOvertime'], '17:30');
+  const jOverGlobal = typeof cleanJamOvertime === 'function' ? cleanJamOvertime(configMap['jamOvertime_Semua'] || configMap['jamOvertime'], '17:30') : '17:30';
   const nOverGlobal = Number(configMap['nominalOvertime_Semua'] || configMap['nominalOvertime'] || 15000);
   const nPagiGlobal = Number(configMap['nominalKerjaPagi_Semua'] || configMap['nominalKerjaPagi'] || 10000);
   const nMakanGlobal = Number(configMap['nominalUangMakan_Semua'] || configMap['nominalUangMakan'] || 15000);
@@ -2596,7 +2708,7 @@ function renderSummaryPengaturan() {
     if (!cabId) return;
 
     const rawJamCab = configMap['jamOvertime_' + cabId];
-    const jOver = rawJamCab ? cleanJamOvertime(rawJamCab, '-') : '-';
+    const jOver = rawJamCab ? (typeof cleanJamOvertime === 'function' ? cleanJamOvertime(rawJamCab, '-') : rawJamCab) : '-';
 
     const nOver = configMap['nominalOvertime_' + cabId] !== undefined && configMap['nominalOvertime_' + cabId] !== '' ? 'Rp ' + Number(configMap['nominalOvertime_' + cabId]).toLocaleString('id-ID') : '-';
     const nPagi = configMap['nominalKerjaPagi_' + cabId] !== undefined && configMap['nominalKerjaPagi_' + cabId] !== '' ? 'Rp ' + Number(configMap['nominalKerjaPagi_' + cabId]).toLocaleString('id-ID') : '-';
@@ -2614,29 +2726,40 @@ function renderSummaryPengaturan() {
   const elTbody = document.getElementById('tbodySummaryRuleCabang');
   if (elTbody) elTbody.innerHTML = htmlRule;
 
-  const rawKhusus = configMap['karyawanKhusus'] || '';
-  const arrayKhusus = rawKhusus ? rawKhusus.split(',').map(s => s.trim()) : [];
-  const nominalKhusus = Number(configMap['nominalInsentifKhusus'] || 0);
+  let htmlKhusus = '';
+  let adaPenerimaBersyarat = false;
 
-  let htmlKhusus = `<div class="mb-2 pb-2 border-bottom">
-    <small class="text-muted d-block">Nominal Base (Bersyarat):</small>
-    <strong class="text-primary fs-6">Rp ${nominalKhusus.toLocaleString('id-ID')}</strong>
-  </div>`;
+  const daftarTargetCabang = [{ id_cabang: 'Semua', nama_cabang: 'Global (Semua)' }].concat(listCabang);
 
-  const penerimaSyarat = listKaryawan.filter(emp => arrayKhusus.includes(String(emp.id_karyawan).trim()));
-  if (penerimaSyarat.length === 0) {
-    htmlKhusus += '<small class="text-muted d-block mb-2">Belum ada penerima insentif bersyarat.</small>';
-  } else {
-    htmlKhusus += '<div class="fw-bold small text-dark mb-1">Penerima Insentif Bersyarat:</div>';
-    htmlKhusus += '<ul class="list-group list-group-flush small mb-3">';
-    penerimaSyarat.forEach(emp => {
-      htmlKhusus += `
-        <li class="list-group-item bg-transparent px-0 py-1 d-flex justify-content-between align-items-center">
-          <span><b>${emp.nama_lengkap || emp.nama}</b> <small class="text-muted">(${emp.id_karyawan})</small></span>
-          <span class="badge bg-warning text-dark">Bersyarat</span>
-        </li>`;
-    });
-    htmlKhusus += '</ul>';
+  daftarTargetCabang.forEach(c => {
+    const cabId = c.id_cabang || c.tb_cabang || '';
+    const cabNama = c.nama_cabang || cabId;
+    
+    const rawKhusus = configMap['karyawanKhusus_' + cabId] || (cabId === 'Semua' ? configMap['karyawanKhusus'] : '');
+    const nominalKhusus = Number(configMap['nominalInsentifKhusus_' + cabId] || (cabId === 'Semua' ? configMap['nominalInsentifKhusus'] : 0));
+
+    if (rawKhusus && nominalKhusus > 0) {
+      adaPenerimaBersyarat = true;
+      const arrayKhusus = rawKhusus.split(',').map(s => s.trim());
+      const penerimaSyarat = listKaryawan.filter(emp => arrayKhusus.includes(String(emp.id_karyawan).trim()));
+
+      if (penerimaSyarat.length > 0) {
+        htmlKhusus += `<div class="fw-bold small text-primary mb-1 mt-2">Cabang ${cabNama} (Rp ${nominalKhusus.toLocaleString('id-ID')}):</div>`;
+        htmlKhusus += '<ul class="list-group list-group-flush small mb-2">';
+        penerimaSyarat.forEach(emp => {
+          htmlKhusus += `
+            <li class="list-group-item bg-transparent px-0 py-1 d-flex justify-content-between align-items-center">
+              <span><b>${emp.nama_lengkap || emp.nama}</b> <small class="text-muted">(${emp.id_karyawan})</small></span>
+              <span class="badge bg-warning text-dark">Bersyarat</span>
+            </li>`;
+        });
+        htmlKhusus += '</ul>';
+      }
+    }
+  });
+
+  if (!adaPenerimaBersyarat) {
+    htmlKhusus += '<small class="text-muted d-block mb-2">Belum ada penerima insentif bersyarat yang dikonfigurasi.</small>';
   }
 
   const penerimaTetap = listKaryawan.filter(emp => Number(emp.insentif_khusus || 0) > 0);
@@ -2679,6 +2802,11 @@ function cleanJamOvertime(val, defaultVal = '17:30') {
   return str;
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * KOREKSI PRESENSI & MODAL EDIT
+ * ----------------------------------------------------------------------------
+ */
 function openModalEditPresensi(idPresensi) {
   const presensi = (GLOBAL_DATA.absensi || GLOBAL_DATA.presensi || []).find(p => 
     String(p.id_presensi || p.id_absen || p[0]) === String(idPresensi)
@@ -2718,7 +2846,6 @@ function openModalEditPresensi(idPresensi) {
   new bootstrap.Modal(document.getElementById('modalEditPresensi')).show();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function simpanKoreksiPresensi(e) {
   e.preventDefault();
   const btn = document.getElementById('btnSimpanKoreksi');
@@ -2744,12 +2871,10 @@ async function simpanKoreksiPresensi(e) {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/presensi/koreksi`, {
+    const res = await apiFetch('/api/presensi/koreksi', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await response.json();
 
     if (btn) {
       btn.disabled = false;
@@ -2774,13 +2899,14 @@ async function simpanKoreksiPresensi(e) {
     }
 
     renderAllTables();
-    showToast('✔️ Koreksi & penandaan berhasil disimpan!');
+
+    if (typeof showToast === 'function') showToast('✔️ Koreksi & penandaan berhasil disimpan!');
   } catch (err) {
     if (btn) {
       btn.disabled = false;
       btn.innerHTML = 'Simpan Koreksi';
     }
-    showToast('❌ Gagal simpan koreksi!', 'danger');
+    if (typeof showToast === 'function') showToast('❌ Gagal simpan koreksi!', 'danger');
   }
 }
 
@@ -2789,10 +2915,11 @@ function renderTabelHistoriPresensiAdmin(dataAbsen) {
   if (!tbody) return;
 
   const list = dataAbsen || (GLOBAL_DATA ? GLOBAL_DATA.absensi || GLOBAL_DATA.presensi : []);
+  
   window.TEMP_ABSENSI_FILTERED = list;
 
   if (!list || list.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Tidak ada data presensi.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="9" class="text-center text-muted">Tidak ada data presensi.</td></tr>';
     return;
   }
 
@@ -2820,6 +2947,13 @@ function renderTabelHistoriPresensiAdmin(dataAbsen) {
     let isMakan = (valMakan === 'Ya' || valMakan === true);
     let idAbs = p.id_presensi || p.id_absen || p[0];
 
+    let jamOutClean = typeof cleanTimeStr === 'function' ? cleanTimeStr(jamOut) : jamOut;
+    let isOvertime18 = (jamOutClean > '18:00:00' && jamOut !== '23:59:59' && jamOut !== '23:59' && jamOut !== '-');
+
+    let badgeOT = isOvertime18 
+      ? '<span class="badge bg-warning text-dark"><i class="bi bi-clock-history"></i> OT (>18:00)</span>' 
+      : '<span class="badge bg-light text-muted border">Tidak</span>';
+
     let badgeStatusHtml = typeof generateAbsenStatusBadge === 'function' 
       ? generateAbsenStatusBadge(p, null, false, tglStr < todayStr, tglStr === todayStr)
       : '<span class="badge bg-primary">Hadir</span>';
@@ -2844,6 +2978,10 @@ function renderTabelHistoriPresensiAdmin(dataAbsen) {
         ${isMakan ? '<span class="badge bg-info text-dark"><i class="bi bi-check-circle"></i> Ya</span>' : '<span class="badge bg-light text-muted border">Tidak</span>'}
       </td>
 
+      <td class="text-center">
+        ${badgeOT}
+      </td>
+
       <td>
         <button class="btn btn-xs btn-outline-warning fw-bold" onclick="openModalEditPresensi('${idAbs}')">
           <i class="bi bi-pencil"></i> Edit / Tandai
@@ -2855,7 +2993,6 @@ function renderTabelHistoriPresensiAdmin(dataAbsen) {
   tbody.innerHTML = html;
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function quickTogglePenanda(idPresensi, tipe, isChecked) {
   const statusStr = isChecked ? 'Ya' : 'Tidak';
 
@@ -2869,14 +3006,13 @@ async function quickTogglePenanda(idPresensi, tipe, isChecked) {
   }
 
   try {
-    await fetch(`${API_BASE_URL}/api/presensi/toggle-penanda`, {
+    await apiFetch('/api/presensi/toggle-penanda', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ id_presensi: idPresensi, tipe: tipe, status: statusStr })
     });
-    showToast('✔️ Penanda berhasil diperbarui!');
+    if (typeof showToast === 'function') showToast('✔️ Penanda berhasil diperbarui!');
   } catch (err) {
-    showToast('❌ Gagal memperbarui penanda!', 'danger');
+    if (typeof showToast === 'function') showToast('❌ Gagal memperbarui penanda!', 'danger');
     loadAppData();
   }
 }
@@ -3043,7 +3179,12 @@ function renderTabelJadwal() {
   for (let i = 0; i < 7; i++) {
     const tglHari = new Date(selasa);
     tglHari.setDate(selasa.getDate() + i);
-    const tglStr = tglHari.toISOString().split('T')[0];
+
+    const yyyy = tglHari.getFullYear();
+    const mm = String(tglHari.getMonth() + 1).padStart(2, '0');
+    const dd = String(tglHari.getDate()).padStart(2, '0');
+    const tglStr = `${yyyy}-${mm}-${dd}`;
+
     const tglFormatted = (typeof formatDisplayDate === 'function') ? formatDisplayDate(tglStr) : tglStr;
 
     let items = listJadwal.filter(j => {
@@ -3056,7 +3197,11 @@ function renderTabelJadwal() {
     if (items.length === 0) {
       const tglMingguLalu = new Date(tglHari);
       tglMingguLalu.setDate(tglHari.getDate() - 7);
-      const tglMingguLaluStr = tglMingguLalu.toISOString().split('T')[0];
+
+      const yLalu = tglMingguLalu.getFullYear();
+      const mLalu = String(tglMingguLalu.getMonth() + 1).padStart(2, '0');
+      const dLalu = String(tglMingguLalu.getDate()).padStart(2, '0');
+      const tglMingguLaluStr = `${yLalu}-${mLalu}-${dLalu}`;
 
       items = listJadwal.filter(j => {
         const jTgl = String(j.tanggal || j.tgl || '').split('T')[0];
@@ -3120,8 +3265,14 @@ function renderTabelJadwal() {
   container.innerHTML = html;
 }
 
+/**
+ * ----------------------------------------------------------------------------
+ * EXPORT PDF & PRINTING
+ * ----------------------------------------------------------------------------
+ */
 function exportPresensiPDF() {
   let tableRowsHtml = '';
+
   const data = window.TEMP_ABSENSI_FILTERED || [];
 
   if (Array.isArray(data) && data.length > 0) {
@@ -3141,11 +3292,16 @@ function exportPresensiPDF() {
 
       const valPagi = item.dapat_kerja_pagi !== undefined ? item.dapat_kerja_pagi : item[7];
       const valMakan = item.dapat_uang_makan !== undefined ? item.dapat_uang_makan : item[8];
-      const valOT = item.overtime || item.komponen_overtime || item[9];
 
       const isPagi = (valPagi === 'Ya' || valPagi === true) ? 'Ya' : 'Tidak';
       const isMakan = (valMakan === 'Ya' || valMakan === true) ? 'Ya' : 'Tidak';
-      const isOT = (valOT > 0 || valOT === 'Ya' || valOT === true) ? 'Ya' : 'Tidak';
+
+      const jamOutClean = typeof cleanTimeStr === 'function' ? cleanTimeStr(jamKeluar) : jamKeluar;
+      const isOvertime18 = (jamOutClean > '18:00:00' && jamKeluar !== '23:59:59' && jamKeluar !== '23:59' && jamKeluar !== '-');
+
+      const badgePDF_OT = isOvertime18 
+        ? '<span style="display: inline-block; padding: 2px 4px; border-radius: 3px; font-size: 8px; background-color: #f59e0b; color: #ffffff; font-weight: bold;">OT (>18:00)</span>'
+        : '<span style="color: #94a3b8;">Tidak</span>';
 
       tableRowsHtml += `
         <tr>
@@ -3160,7 +3316,7 @@ function exportPresensiPDF() {
           </td>
           <td style="text-align: center;">${isPagi}</td>
           <td style="text-align: center;">${isMakan}</td>
-          <td style="text-align: center;">${isOT}</td>
+          <td style="text-align: center;">${badgePDF_OT}</td>
         </tr>
       `;
     });
@@ -3178,8 +3334,8 @@ function exportPresensiPDF() {
       if (row.cells.length > 1) {
         tableRowsHtml += '<tr>';
         tableRowsHtml += `<td style="text-align: center;">${no++}</td>`;
-        for (let i = 0; i < Math.min(row.cells.length - 1, 7); i++) {
-          tableRowsHtml += `<td style="text-align: center;">${row.cells[i].innerText.trim().replace(/\n/g, '<br>')}</td>`;
+        for (let i = 0; i < Math.min(row.cells.length - 1, 8); i++) {
+          tableRowsHtml += `<td style="text-align: center;">${row.cells[i].innerHTML}</td>`;
         }
         tableRowsHtml += '</tr>';
       }
@@ -3191,80 +3347,70 @@ function exportPresensiPDF() {
     return;
   }
 
-  const tglStart = document.getElementById('filterAbsenStart')?.value || document.getElementById('payStart')?.value || '';
-  const tglEnd = document.getElementById('filterAbsenEnd')?.value || document.getElementById('payEnd')?.value || '';
-  
+  const tglStart = document.getElementById('filterHistoriStart')?.value || document.getElementById('filterAbsenStart')?.value || '';
+  const tglEnd = document.getElementById('filterHistoriEnd')?.value || document.getElementById('filterAbsenEnd')?.value || '';
+  const elCabang = document.getElementById('filterHistoriCabang') || document.getElementById('filterAbsenCabang');
+  const namaCabang = (elCabang && elCabang.selectedIndex >= 0) ? elCabang.options[elCabang.selectedIndex].text : 'Semua Cabang';
+
   let teksPeriode = 'Semua Periode Data';
   if (tglStart && tglEnd) {
-    const fmtStart = typeof formatDisplayDate === 'function' ? formatDisplayDate(tglStart) : tglStart;
-    const fmtEnd = typeof formatDisplayDate === 'function' ? formatDisplayDate(tglEnd) : tglEnd;
-    teksPeriode = `Periode: ${fmtStart} s/d ${fmtEnd}`;
+    teksPeriode = `Periode: ${tglStart} s/d ${tglEnd}`;
   } else if (tglStart) {
-    const fmtStart = typeof formatDisplayDate === 'function' ? formatDisplayDate(tglStart) : tglStart;
-    teksPeriode = `Periode Mulai: ${fmtStart}`;
+    teksPeriode = `Periode Mulai: ${tglStart}`;
   }
 
   const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
-  const printWindow = window.open('', '_blank');
 
-  const htmlContent = `
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <title>Laporan Histori Presensi Karyawan</title>
-      <style>
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 10px; color: #1e293b; }
-        .header { text-align: center; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px; }
-        .header h2 { margin: 0; color: #003366; text-transform: uppercase; font-size: 16px; }
-        .header p { margin: 3px 0 0; font-size: 11px; color: #003366; font-weight: 600; }
-        .header .sub-date { margin-top: 2px; font-size: 9px; color: #64748b; font-weight: normal; }
-        table { width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9px; }
-        th { background-color: #003366; color: white; padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center; }
-        td { padding: 4px 3px; border: 1px solid #cbd5e1; vertical-align: middle; }
-        tr:nth-child(even) { background-color: #f8fafc; }
-        .footer { margin-top: 12px; font-size: 8px; text-align: right; color: #94a3b8; }
-        
-        @media print { 
-          @page { size: A4 portrait; margin: 8mm; } 
-        }
-      </style>
-    </head>
-    <body>
-      <div class="header">
-        <h2>Laporan Histori Presensi Karyawan</h2>
-        <p>${teksPeriode}</p>
-        <div class="sub-date">Dicetak pada: ${todayStr}</div>
-      </div>
-      <table>
-        <thead>
-          <tr>
-            <th style="width: 25px;">No</th>
-            <th>Nama Karyawan</th>
-            <th>Tanggal</th>
-            <th>Masuk</th>
-            <th>Keluar</th>
-            <th>Status & Radius</th>
-            <th>Pagi</th>
-            <th>Makan</th>
-            <th>OT</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${tableRowsHtml}
-        </tbody>
-      </table>
-      <div class="footer">
-        <p>Dokumen ini dihasilkan secara otomatis oleh Sistem Operasional & Payroll</p>
-      </div>
-      <script>
-        window.onload = function() { window.print(); };
-      <\/script>
-    </body>
-    </html>
+  const element = document.createElement('div');
+  element.style.padding = '10px';
+  element.style.fontFamily = 'Segoe UI, Tahoma, Geneva, Verdana, sans-serif';
+  element.style.color = '#1e293b';
+
+  element.innerHTML = `
+    <div style="text-align: center; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 6px;">
+      <h2 style="margin: 0; color: #003366; text-transform: uppercase; font-size: 16px;">Laporan Histori Presensi Karyawan</h2>
+      <p style="margin: 3px 0 0; font-size: 11px; color: #003366; font-weight: 600;">Cabang: ${namaCabang} | ${teksPeriode}</p>
+      <div style="margin-top: 2px; font-size: 9px; color: #64748b;">Dicetak pada: ${todayStr}</div>
+    </div>
+    <table style="width: 100%; border-collapse: collapse; margin-top: 8px; font-size: 9px;">
+      <thead>
+        <tr style="background-color: #003366; color: white;">
+          <th style="width: 25px; padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">No</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Nama Karyawan</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Tanggal</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Masuk</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Keluar</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Status & Radius</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Pagi</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">Makan</th>
+          <th style="padding: 5px 3px; border: 1px solid #cbd5e1; text-align: center;">OT</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${tableRowsHtml}
+      </tbody>
+    </table>
+    <div style="margin-top: 12px; font-size: 8px; text-align: right; color: #94a3b8;">
+      <p>Dokumen ini dihasilkan secara otomatis oleh Sistem Operasional & Payroll</p>
+    </div>
   `;
 
-  printWindow.document.write(htmlContent);
-  printWindow.document.close();
+  const opt = {
+    margin:       [8, 8, 8, 8],
+    filename:     `Laporan_Presensi_${namaCabang.replace(/[^a-zA-Z0-9]/g, '_')}_${tglStart || 'All'}.pdf`,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, logging: false },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'portrait' }
+  };
+
+  if (typeof html2pdf !== 'undefined') {
+    html2pdf().set(opt).from(element).save();
+  } else {
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`<html><head><title>Laporan Presensi</title></head><body>${element.innerHTML}</body></html>`);
+    printWindow.document.close();
+    printWindow.print();
+  }
 }
 
 function cetakStrukThermal80mm(item) {
@@ -3418,7 +3564,6 @@ function cetakStrukThermal80mm(item) {
   printWindow.document.close();
 }
 
-// 🟢 DIGANTI DENGAN FETCH API
 async function eksekusiSimpanPayroll() {
   const dataPayroll = window.TEMP_PAYROLL || [];
   if (dataPayroll.length === 0) {
@@ -3434,13 +3579,10 @@ async function eksekusiSimpanPayroll() {
   };
 
   try {
-    const response = await fetch(`${API_BASE_URL}/api/payroll/rekap`, {
+    const res = await apiFetch('/api/payroll/simpan-rekap', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload)
     });
-    const res = await response.json();
-
     if (res && res.status === 'success') {
       alert("✅ " + res.message);
       if (typeof renderSummaryPayroll === 'function') renderSummaryPayroll();
@@ -3448,12 +3590,132 @@ async function eksekusiSimpanPayroll() {
       alert("❌ Error: " + (res ? res.message : 'Gagal menyimpan payroll.'));
     }
   } catch (err) {
-    alert("❌ Error Server: " + err.message);
+    alert("❌ Error jaringan saat menyimpan payroll.");
   }
 }
 
-let idleTimer;
+function generateAndDownloadPayrollPDF(payloadSave) {
+  const data = window.TEMP_PAYROLL || [];
+  if (!data || data.length === 0) {
+    alert("Tidak ada data payroll untuk dicetak!");
+    return;
+  }
 
+  const listKaryawan = window.DATA_KARYAWAN || window.TEMP_KARYAWAN || GLOBAL_DATA.karyawan || [];
+
+  const tglStart = payloadSave?.tgl_mulai || document.getElementById('payStart')?.value || '';
+  const tglEnd = payloadSave?.tgl_selesai || document.getElementById('payEnd')?.value || '';
+  const elCabang = document.getElementById('payCabang') || document.getElementById('filterPayCabang');
+  const namaCabang = payloadSave?.nama_cabang || (elCabang && elCabang.selectedIndex >= 0 ? elCabang.options[elCabang.selectedIndex].text : 'Semua Cabang');
+  const todayStr = new Date().toLocaleDateString('id-ID', { day: 'numeric', month: 'long', year: 'numeric' });
+
+  let rowsHtml = '';
+  let grandTotalGaji = 0;
+
+  data.forEach((item, index) => {
+    const empId = item.id_karyawan || '';
+    
+    let empObj = listKaryawan.find(k => String(k.id_karyawan).trim() === String(empId).trim());
+    const nama = item.nama || item.nama_lengkap || (empObj ? empObj.nama_lengkap || empObj.nama : empId);
+    const posisi = item.posisi || item.jabatan || (empObj ? empObj.jabatan || empObj.posisi : '-');
+
+    const gHarian = Number(item.gaji_harian || 0);
+    const hadir = item.total_hadir || 0;
+    const sub = Number(item.subtotal || 0);
+    const potKas = Number(item.potongan_kasbon || 0);
+    const lain = Number(item.lain_lain || 0);
+    const total = Number(item.total_diterima || 0);
+
+    grandTotalGaji += total;
+
+    rowsHtml += `
+      <tr>
+        <td style="text-align: center; padding: 6px 4px; border: 1px solid #000000;">${index + 1}</td>
+        <td style="padding: 6px 4px; border: 1px solid #000000;"><b>${nama}</b><br><small style="color: #555555;">${empId}</small></td>
+        <td style="padding: 6px 4px; border: 1px solid #000000;">${posisi}</td>
+        <td style="text-align: right; padding: 6px 4px; border: 1px solid #000000;">Rp ${gHarian.toLocaleString('id-ID')}</td>
+        <td style="text-align: center; padding: 6px 4px; border: 1px solid #000000;"><b>${hadir} HR</b></td>
+        <td style="text-align: right; padding: 6px 4px; border: 1px solid #000000;">Rp ${sub.toLocaleString('id-ID')}</td>
+        <td style="text-align: right; padding: 6px 4px; border: 1px solid #000000; color: #15803d;">+ Rp ${lain.toLocaleString('id-ID')}</td>
+        <td style="text-align: right; padding: 6px 4px; border: 1px solid #000000; color: #b91c1c;">- Rp ${potKas.toLocaleString('id-ID')}</td>
+        <td style="text-align: right; padding: 6px 4px; border: 1px solid #000000; font-weight: bold; color: #003366;">Rp ${total.toLocaleString('id-ID')}</td>
+      </tr>
+    `;
+  });
+
+  const container = document.createElement('div');
+  container.id = 'tempPdfPayrollContainer';
+  container.style.width = '1000px';
+  container.style.backgroundColor = '#ffffff';
+  container.style.padding = '20px';
+  container.style.fontFamily = 'Arial, sans-serif';
+  container.style.color = '#000000';
+
+  container.innerHTML = `
+    <div style="text-align: center; margin-bottom: 12px; border-bottom: 2px solid #003366; padding-bottom: 8px;">
+      <h2 style="margin: 0; color: #003366; text-transform: uppercase; font-size: 18px;">Laporan Rekapitulasi Payroll & Penggajian Karyawan</h2>
+      <p style="margin: 4px 0 0; font-size: 12px; color: #003366; font-weight: bold;">Cabang: ${namaCabang} | Periode: ${tglStart} s/d ${tglEnd}</p>
+      <div style="margin-top: 2px; font-size: 10px; color: #555555;">Dicetak pada: ${todayStr}</div>
+    </div>
+
+    <table style="width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px;" border="1" cellpadding="5">
+      <thead>
+        <tr style="background-color: #003366; color: #ffffff;">
+          <th style="width: 30px; padding: 6px; text-align: center;">No</th>
+          <th style="padding: 6px; text-align: left;">Nama Karyawan</th>
+          <th style="padding: 6px; text-align: left;">Posisi / Jabatan</th>
+          <th style="padding: 6px; text-align: right;">Gaji Harian</th>
+          <th style="padding: 6px; text-align: center;">Hadir</th>
+          <th style="padding: 6px; text-align: right;">Subtotal</th>
+          <th style="padding: 6px; text-align: right;">Komponen Lain</th>
+          <th style="padding: 6px; text-align: right;">Pot. Kasbon</th>
+          <th style="padding: 6px; text-align: right;">Total Diterima</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rowsHtml}
+        <tr style="background-color: #f1f5f9; font-weight: bold;">
+          <td colspan="8" style="padding: 8px; text-align: right; border: 1px solid #000000;">GRAND TOTAL PAYROLL:</td>
+          <td style="padding: 8px; text-align: right; border: 1px solid #000000; color: #003366; font-size: 12px;">Rp ${grandTotalGaji.toLocaleString('id-ID')}</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div style="margin-top: 20px; font-size: 9px; text-align: right; color: #666666;">
+      <p>Dokumen Resmi Hasil Output Otomatis Sistem Operasional & Payroll</p>
+    </div>
+  `;
+
+  document.body.appendChild(container);
+
+  const opt = {
+    margin:       [8, 8, 8, 8],
+    filename:     `Rekap_Payroll_${namaCabang.replace(/[^a-zA-Z0-9]/g, '_')}_${tglStart}_sd_${tglEnd}.pdf`,
+    image:        { type: 'jpeg', quality: 0.98 },
+    html2canvas:  { scale: 2, useCORS: true, logging: false },
+    jsPDF:        { unit: 'mm', format: 'a4', orientation: 'landscape' }
+  };
+
+  if (typeof html2pdf !== 'undefined') {
+    setTimeout(() => {
+      html2pdf().set(opt).from(container).save().then(() => {
+        if (document.body.contains(container)) document.body.removeChild(container);
+      }).catch(err => {
+        console.error("Gagal cetak PDF:", err);
+        if (document.body.contains(container)) document.body.removeChild(container);
+      });
+    }, 300);
+  } else {
+    alert("Library html2pdf.js belum dimuat!");
+    if (document.body.contains(container)) document.body.removeChild(container);
+  }
+}
+
+/**
+ * ----------------------------------------------------------------------------
+ * AUTO-LOGOUT ON INACTIVITY
+ * ----------------------------------------------------------------------------
+ */
 function resetIdleTimer() {
   clearTimeout(idleTimer);
   const idleTimeoutDuration = 15 * 60 * 1000; 
