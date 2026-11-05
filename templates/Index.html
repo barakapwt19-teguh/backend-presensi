@@ -816,7 +816,7 @@
 
   // Load Modals.html secara otomatis saat halaman dimuat
   document.addEventListener("DOMContentLoaded", function () {
-    fetch('/Modals.html')
+    fetch('/static/Modals.html')
       .then((response) => {
         if (response.ok) return response.text();
         throw new Error("File Modals.html tidak ditemukan.");
@@ -825,7 +825,7 @@
         document.getElementById("modalsContainer").innerHTML = html;
       })
       .catch((err) => console.warn("Notice Modals:", err.message));
-  });
+});
 </script>
 
 <!-- MODUL JAVASCRIPT KUSTOM (DILUAT SECARA BERURUTAN) -->
