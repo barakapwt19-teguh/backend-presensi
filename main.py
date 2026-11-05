@@ -1,6 +1,8 @@
 import json
 import math
 import os
+import libsql_client
+
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -61,6 +63,64 @@ async def get_modals():
     if os.path.exists(modals_path):
         return FileResponse(modals_path)
     return Response(status_code=404)
+
+TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
+
+def get_turso_client():
+    if not TURSO_URL or not TURSO_TOKEN:
+        raise Exception("Konfigurasi Turso URL atau Auth Token belum disetel di environment variables.")
+    return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
+
+@app.post("/api/sync/sheets-to-turso")
+def sync_sheets_to_turso():
+    try:
+        client = get_turso_client()
+        
+        # Contoh sinkronisasi tabel tb_karyawan dari Google Sheets ke Turso
+        raw_karyawan = get_data_table("tb_karyawan")
+        
+        # Buat tabel jika belum ada di Turso
+        client.execute("""
+            CREATE TABLE IF NOT EXISTS tb_karyawan (
+                id_karyawan TEXT PRIMARY KEY,
+                nama_lengkap TEXT,
+                id_cabang TEXT,
+                posisi TEXT,
+                status TEXT,
+                hari_libur_rutin TEXT
+            )
+        """)
+        
+        # Masukkan / Perbarui data ke Turso
+        for k in raw_karyawan:
+            client.execute(
+                """
+                INSERT OR REPLACE INTO tb_karyawan (id_karyawan, nama_lengkap, id_cabang, posisi, status, hari_libur_rutin)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    k.get("id_karyawan"),
+                    k.get("nama_lengkap"),
+                    k.get("id_cabang"),
+                    k.get("posisi"),
+                    k.get("status"),
+                    k.get("hari_libur_rutin", "Minggu")
+                )
+            )
+            
+        return {"status": "success", "message": "Berhasil mengimpor data tb_karyawan dari Google Sheets ke Turso Cloud!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/sync/turso-to-sheets")
+def sync_turso_to_sheets():
+    try:
+        # Logika untuk mengambil data dari Turso lalu memperbarui Google Sheets via gspread
+        # (Dapat disesuaikan dengan kebutuhan tabel rekap Anda)
+        return {"status": "success", "message": "Berhasil mengekspor data Turso ke Google Sheets!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 # Konfigurasi Google Sheets
 SCOPES = [

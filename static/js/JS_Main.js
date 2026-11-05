@@ -62,6 +62,25 @@ async function apiFetch(endpoint, options = {}) {
   }
 }
 
+async function triggerSync(type) {
+    if (!confirm(`Apakah Anda yakin ingin melakukan proses sinkronisasi (${type})?`)) return;
+    
+    // Tampilkan indikator loading jika ada
+    try {
+        const endpoint = type === 'sheets-to-turso' ? '/api/sync/sheets-to-turso' : '/api/sync/turso-to-sheets';
+        const res = await apiFetch(endpoint, { method: 'POST' });
+        
+        if (res && res.status === 'success') {
+            alert(res.message);
+            location.reload();
+        } else {
+            alert("Gagal sinkronisasi: " + (res ? res.message : 'Unknown error'));
+        }
+    } catch (err) {
+        alert("Terjadi kesalahan sistem: " + err.message);
+    }
+}
+
 /**
  * ----------------------------------------------------------------------------
  * AUTHENTICATION & SESSION MANAGEMENT
