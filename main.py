@@ -8,8 +8,11 @@ from google.oauth2.service_account import Credentials
 import gspread
 from pydantic import BaseModel
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 app = FastAPI(title="Backend Presensi & Operasional Logistik Baraka")
 
@@ -20,6 +23,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# --- TAMBAHKAN DUA BARIS INI (Menghubungkan Folder Static & Templates) ---
+app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory="templates")
+
+# --- UBAH RUTE ROOT (/) MENJADI INI ---
+@app.get("/", response_class=HTMLResponse)
+async def read_root(request: Request):
+    return templates.TemplateResponse("Index.html", {"request": request})
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -219,12 +231,6 @@ def get_senin_minggu_range(date_obj: datetime) -> Dict[str, str]:
 class LoginPayload(BaseModel):
     username: str
     password: str
-
-
-@app.get("/")
-def root():
-    return {"status": "success", "message": "API Backend Presensi Baraka (Python FastAPI) Aktif"}
-
 
 @app.post("/api/auth/login")
 @app.post("/api/login")
