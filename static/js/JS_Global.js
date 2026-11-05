@@ -43,7 +43,7 @@ async function apiFetch(endpoint, options = {}) {
   if (typeof callBackend === "function") {
     return await callBackend(endpoint, method, bodyData);
   } else {
-    const baseUrl = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : "https://backend-presensi-tau.vercel.app";
+    const baseUrl = typeof API_BASE_URL !== "undefined" ? API_BASE_URL : window.location.origin;
     const reqOptions = {
       method: method,
       headers: { "Content-Type": "application/json", ...(options.headers || {}) }
