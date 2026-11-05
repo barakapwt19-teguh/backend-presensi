@@ -792,7 +792,7 @@ def get_kalkulasi_payroll(tgl_mulai: str, tgl_selesai: str, id_cabang: Optional[
 
 @app.get("/api/app/initial-data")
 @app.get("/api/initial-data")
-def get_initial_data(id_karyawan: str, role: str):
+def get_initial_data(id_karyawan: str = "", role: str = ""):
     try:
         all_karyawan = get_data_table("tb_karyawan")
         raw_absensi = get_data_table("tb_absensi")
