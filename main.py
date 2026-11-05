@@ -2,6 +2,7 @@ import json
 import math
 import os
 import libsql_client
+import asyncio
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -73,15 +74,14 @@ def get_turso_client():
     return libsql_client.create_client(url=TURSO_URL, auth_token=TURSO_TOKEN)
 
 @app.post("/api/sync/sheets-to-turso")
-def sync_sheets_to_turso():
+async def sync_sheets_to_turso():
     try:
+        raw_karyawan = await asyncio.to_thread(get_data_table, "tb_karyawan")
         client = get_turso_client()
         
-        # Contoh sinkronisasi tabel tb_karyawan dari Google Sheets ke Turso
-        raw_karyawan = get_data_table("tb_karyawan")
-        
-        # Buat tabel jika belum ada di Turso
-        client.execute("""
+        await asyncio.to_thread(
+            client.execute,
+            """
             CREATE TABLE IF NOT EXISTS tb_karyawan (
                 id_karyawan TEXT PRIMARY KEY,
                 nama_lengkap TEXT,
@@ -90,11 +90,12 @@ def sync_sheets_to_turso():
                 status TEXT,
                 hari_libur_rutin TEXT
             )
-        """)
+            """
+        )
         
-        # Masukkan / Perbarui data ke Turso
         for k in raw_karyawan:
-            client.execute(
+            await asyncio.to_thread(
+                client.execute,
                 """
                 INSERT OR REPLACE INTO tb_karyawan (id_karyawan, nama_lengkap, id_cabang, posisi, status, hari_libur_rutin)
                 VALUES (?, ?, ?, ?, ?, ?)
@@ -111,7 +112,10 @@ def sync_sheets_to_turso():
             
         return {"status": "success", "message": "Berhasil mengimpor data tb_karyawan dari Google Sheets ke Turso Cloud!"}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        err_msg = traceback.format_exc()
+        print("DETAIL SYNC ERROR:", err_msg)
+        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi: {str(e)}")
 
 @app.post("/api/sync/turso-to-sheets")
 def sync_turso_to_sheets():

@@ -13,26 +13,42 @@ function initMapAndLocation() {
     if (adminGroup) adminGroup.classList.remove('d-none');
   }
 
+  // Ambil data cabang dengan fallback aman ke Purwokerto / Default
   let empCabang = (GLOBAL_DATA && GLOBAL_DATA.cabang && GLOBAL_DATA.cabang.length > 0)
     ? (GLOBAL_DATA.cabang.find(c => String(c.id_cabang) === String(CURRENT_USER ? CURRENT_USER.id_cabang : '')) || GLOBAL_DATA.cabang[0])
-    : { id_cabang: "CAB-001", latitude: -6.200000, longitude: 106.816666, radius_meter: 100, nama_cabang: 'Kantor Pusat' };
+    : { id_cabang: "CAB-001", latitude: -7.421458, longitude: 109.233322, radius_meter: 100, nama_cabang: 'Kantor Pusat' };
 
-  const latCabang = Number(empCabang.latitude || -6.200000);
-  const longCabang = Number(empCabang.longitude || 106.816666);
-  const radiusMeters = Number(empCabang.radius_meter || empCabang.radius || 100);
+  // Validasi ketat koordinat agar tidak bernilai NaN
+  let latCabang = Number(empCabang.latitude);
+  let longCabang = Number(empCabang.longitude);
+  let radiusMeters = Number(empCabang.radius_meter || empCabang.radius || 100);
+
+  if (isNaN(latCabang) || isNaN(longCabang)) {
+    console.warn("Koordinat cabang tidak valid, menggunakan default Purwokerto.");
+    latCabang = -7.421458;
+    longCabang = 109.233322;
+  }
 
   try {
     const mapEl = document.getElementById('map') || document.getElementById('mapPresensi');
     if (mapEl && typeof L !== 'undefined') {
       const mapId = mapEl.id;
+
+      // Jika container peta berubah atau belum ada instance, bersihkan instance lama jika ada
+      if (MAP_INSTANCE && MAP_INSTANCE._container && MAP_INSTANCE._container.id !== mapId) {
+        MAP_INSTANCE.remove();
+        MAP_INSTANCE = null;
+      }
+
       if (!MAP_INSTANCE) {
         MAP_INSTANCE = L.map(mapId).setView([latCabang, longCabang], 16);
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
           attribution: '© OpenStreetMap'
         }).addTo(MAP_INSTANCE);
 
         CABANG_MARKER = L.marker([latCabang, longCabang]).addTo(MAP_INSTANCE)
-          .bindPopup(`<b>${empCabang.nama_cabang}</b><br>Radius: ${radiusMeters}m`);
+          .bindPopup(`<b>${empCabang.nama_cabang || 'Kantor'}</b><br>Radius: ${radiusMeters}m`);
           
         CABANG_CIRCLE = L.circle([latCabang, longCabang], {
           color: '#0d6efd',
@@ -42,9 +58,13 @@ function initMapAndLocation() {
         }).addTo(MAP_INSTANCE);
       } else {
         MAP_INSTANCE.setView([latCabang, longCabang], 16);
+        if (CABANG_MARKER) CABANG_MARKER.setLatLng([latCabang, longCabang]);
+        if (CABANG_CIRCLE) {
+          CABANG_CIRCLE.setLatLng([latCabang, longCabang]);
+          CABANG_CIRCLE.setRadius(radiusMeters);
+        }
       }
       
-      // Fix Map Kosong: Panggil invalidateSize berulang untuk memastikan peta ter-render penuh
       setTimeout(() => { if (MAP_INSTANCE) MAP_INSTANCE.invalidateSize(); }, 300);
       setTimeout(() => { if (MAP_INSTANCE) MAP_INSTANCE.invalidateSize(); }, 800);
     }
@@ -81,7 +101,6 @@ function initMapAndLocation() {
         const btnOut = document.getElementById('btnCheckOut');
 
         if (statusDiv) {
-          // 1. Cek apakah pengguna adalah Management (Admin / HRD)
           const isBebasRadius = (CURRENT_USER && (CURRENT_USER.role === 'Admin' || CURRENT_USER.role === 'HRD'));
 
           if (isBebasRadius) {
@@ -200,3 +219,4 @@ async function kirimPresensi(jenis) {
     alert("Gagal melakukan presensi: " + err.message);
   }
 }
+
