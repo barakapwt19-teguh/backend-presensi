@@ -56,12 +56,11 @@ async def favicon():
 # 5. Rute Modals.html (Mencegah Error 404 Modals)
 @app.get("/Modals.html", include_in_schema=False)
 @app.get("/modals.html", include_in_schema=False)
-async def get_modals_direct():
+async def get_modals():
     modals_path = os.path.join(BASE_DIR, "static", "Modals.html")
     if os.path.exists(modals_path):
         return FileResponse(modals_path)
     return Response(status_code=404)
-    )
 
 # Konfigurasi Google Sheets
 SCOPES = [
