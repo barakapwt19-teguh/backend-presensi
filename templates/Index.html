@@ -816,7 +816,7 @@
 
   // Load Modals.html secara otomatis saat halaman dimuat
   document.addEventListener("DOMContentLoaded", function () {
-    fetch('/templates/Modals.html')
+    fetch('/Modals.html')
       .then((response) => {
         if (response.ok) return response.text();
         throw new Error("File Modals.html tidak ditemukan.");
