@@ -31,7 +31,10 @@ templates = Jinja2Templates(directory="templates")
 # --- UBAH RUTE ROOT (/) MENJADI INI ---
 @app.get("/", response_class=HTMLResponse)
 async def read_root(request: Request):
-    return templates.TemplateResponse("Index.html", {"request": request})
+    return templates.TemplateResponse(
+        request=request, 
+        name="Index.html"
+    )
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
