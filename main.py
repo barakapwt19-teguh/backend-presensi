@@ -736,6 +736,8 @@ def get_initial_data(id_karyawan: str, role: str):
         raw_area = get_data_table("tb_area_distribusi")
         raw_jadwal = get_data_table("tb_jadwal_distribusi")
         settings_data = get_data_table("tb_pengaturan")
+        raw_pengaturan_gaji = get_data_table("tb_pengaturan_gaji")
+        raw_cabang = get_data_table("tb_cabang")
 
         settings = {r["key"]: r["value"] for r in settings_data if r.get("key")}
         
@@ -770,7 +772,7 @@ def get_initial_data(id_karyawan: str, role: str):
                 }
                 for k in all_karyawan if k.get("status") == "Aktif"
             ],
-            "cabang": get_data_table("tb_cabang"),
+            "cabang": raw_cabang,
             "area": raw_area,
             "jadwal": raw_jadwal,
             "absensi": all_absensi,
@@ -779,6 +781,7 @@ def get_initial_data(id_karyawan: str, role: str):
             "libur": raw_libur,
             "kasbon": raw_kasbon,
             "payroll": raw_payroll,
+            "pengaturanGaji": raw_pengaturan_gaji,
             "statusAbsen": "BELUM_ABSEN",
             "periodeMingguIni": {
                 "mulai": (now - timedelta(days=now.weekday())).strftime("%Y-%m-%d"),
