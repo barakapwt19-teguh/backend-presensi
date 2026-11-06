@@ -3,7 +3,6 @@ import math
 import os
 import libsql_client
 import asyncio
-import sqlite3
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -11,7 +10,6 @@ from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
 from google.oauth2.service_account import Credentials
 import gspread
-from pydantic import BaseModel
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -49,7 +47,7 @@ async def read_root(request: Request):
         name="Index.html"
     )
 
-# 4. Rute Favicon (Mencegah Error 404 Favicon)
+# 4. Rute Favicon
 @app.get("/favicon.ico", include_in_schema=False)
 async def favicon():
     favicon_path = os.path.join(static_dir, "favicon.ico")
@@ -57,7 +55,7 @@ async def favicon():
         return FileResponse(favicon_path)
     return Response(status_code=204)
 
-# 5. Rute Modals.html (Mencegah Error 404 Modals)
+# 5. Rute Modals.html
 @app.get("/Modals.html", include_in_schema=False)
 @app.get("/modals.html", include_in_schema=False)
 async def get_modals():
@@ -66,6 +64,9 @@ async def get_modals():
         return FileResponse(modals_path)
     return Response(status_code=404)
 
+# ==========================================
+# KONEKSI & SINKRONISASI TURSO CLOUD
+# ==========================================
 TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
 TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 
@@ -77,52 +78,148 @@ def get_turso_client():
 @app.post("/api/sync/sheets-to-turso")
 async def sync_sheets_to_turso():
     try:
-        raw_karyawan = await asyncio.to_thread(get_data_table, "tb_karyawan")
         client = get_turso_client()
-        
-        await asyncio.to_thread(
-            client.execute,
-            """
-            CREATE TABLE IF NOT EXISTS tb_karyawan (
-                id_karyawan TEXT PRIMARY KEY,
-                nama_lengkap TEXT,
-                id_cabang TEXT,
-                posisi TEXT,
-                status TEXT,
-                hari_libur_rutin TEXT
-            )
-            """
-        )
-        
-        for k in raw_karyawan:
-            await asyncio.to_thread(
-                client.execute,
-                """
-                INSERT OR REPLACE INTO tb_karyawan (id_karyawan, nama_lengkap, id_cabang, posisi, status, hari_libur_rutin)
-                VALUES (?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    k.get("id_karyawan"),
-                    k.get("nama_lengkap"),
-                    k.get("id_cabang"),
-                    k.get("posisi"),
-                    k.get("status"),
-                    k.get("hari_libur_rutin", "Minggu")
+
+        # 1. Buat Seluruh Tabel di Turso Cloud jika belum ada
+        tables_definition = [
+            """CREATE TABLE IF NOT EXISTS tb_pengaturan (key TEXT PRIMARY KEY, value TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_pengaturan_gaji (id TEXT PRIMARY KEY, keterangan TEXT, nominal REAL)""",
+            """CREATE TABLE IF NOT EXISTS tb_karyawan (id_karyawan TEXT PRIMARY KEY, nama_lengkap TEXT, jabatan TEXT, id_cabang TEXT, email TEXT, role TEXT, username TEXT, password TEXT, status TEXT, gaji_harian REAL, hari_libur_rutin TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_libur (id_libur TEXT PRIMARY KEY, tanggal TEXT, keterangan TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_tukar_libur (id_tukar TEXT PRIMARY KEY, id_karyawan TEXT, tanggal_asal TEXT, tanggal_tujuan TEXT, status TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_izin (id_izin TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jenis_izin TEXT, keterangan TEXT, status TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_area_distribusi (id_area TEXT PRIMARY KEY, nama_area TEXT, keterangan TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_jadwal_distribusi (id_jadwal TEXT PRIMARY KEY, id_cabang TEXT, id_area TEXT, hari TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_cabang (id_cabang TEXT PRIMARY KEY, nama_cabang TEXT, alamat TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_payroll (id_payroll TEXT PRIMARY KEY, id_karyawan TEXT, periode TEXT, total_gaji REAL, status TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_absensi (id_absen TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jam_masuk TEXT, jam_keluar TEXT, koordinat TEXT, status_radius TEXT, dapat_kerja_pagi TEXT, dapat_uang_makan TEXT, catatan_koreksi TEXT)""",
+            """CREATE TABLE IF NOT EXISTS tb_kasbon (id_kasbon TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jumlah REAL, keterangan TEXT, status TEXT)"""
+        ]
+
+        for query in tables_definition:
+            await asyncio.to_thread(client.execute, query)
+
+        # 2. Sinkronisasi Data dari Google Sheets ke Turso Cloud
+        # A. tb_pengaturan
+        for r in await asyncio.to_thread(get_data_table, "tb_pengaturan"):
+            if r.get("key"):
+                await asyncio.to_thread(client.execute, 
+                    "INSERT INTO tb_pengaturan (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+                    (r.get("key"), r.get("value"))
                 )
-            )
-            
-        return {"status": "success", "message": "Berhasil mengimpor data tb_karyawan dari Google Sheets ke Turso Cloud!"}
+
+        # B. tb_pengaturan_gaji
+        for r in await asyncio.to_thread(get_data_table, "tb_pengaturan_gaji"):
+            uid = r.get("id") or r.get("id_pengaturan")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_pengaturan_gaji (id, keterangan, nominal) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET keterangan=excluded.keterangan, nominal=excluded.nominal",
+                    (uid, r.get("keterangan"), float(r.get("nominal") or 0))
+                )
+
+        # C. tb_karyawan
+        for r in await asyncio.to_thread(get_data_table, "tb_karyawan"):
+            if r.get("id_karyawan"):
+                await asyncio.to_thread(client.execute,
+                    """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                       ON CONFLICT(id_karyawan) DO UPDATE SET nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin""",
+                    (r.get("id_karyawan"), r.get("nama_lengkap"), r.get("jabatan"), r.get("id_cabang"), r.get("email"), r.get("role"), r.get("username"), r.get("password"), r.get("status"), float(r.get("gaji_harian") or 0), r.get("hari_libur_rutin", "Minggu"))
+                )
+
+        # D. tb_libur
+        for r in await asyncio.to_thread(get_data_table, "tb_libur"):
+            uid = r.get("id_libur") or r.get("tanggal")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_libur (id_libur, tanggal, keterangan) VALUES (?, ?, ?) ON CONFLICT(id_libur) DO UPDATE SET tanggal=excluded.tanggal, keterangan=excluded.keterangan",
+                    (str(uid), r.get("tanggal"), r.get("keterangan"))
+                )
+
+        # E. tb_tukar_libur
+        for r in await asyncio.to_thread(get_data_table, "tb_tukar_libur"):
+            uid = r.get("id_tukar")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_tukar_libur (id_tukar, id_karyawan, tanggal_asal, tanggal_tujuan, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id_tukar) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal_asal=excluded.tanggal_asal, tanggal_tujuan=excluded.tanggal_tujuan, status=excluded.status",
+                    (uid, r.get("id_karyawan"), r.get("tanggal_asal"), r.get("tanggal_tujuan"), r.get("status"))
+                )
+
+        # F. tb_izin
+        for r in await asyncio.to_thread(get_data_table, "tb_izin"):
+            uid = r.get("id_izin")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_izin (id_izin, id_karyawan, tanggal, jenis_izin, keterangan, status) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id_izin) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jenis_izin=excluded.jenis_izin, keterangan=excluded.keterangan, status=excluded.status",
+                    (uid, r.get("id_karyawan"), r.get("tanggal"), r.get("jenis_izin"), r.get("keterangan"), r.get("status"))
+                )
+
+        # G. tb_area_distribusi
+        for r in await asyncio.to_thread(get_data_table, "tb_area_distribusi"):
+            uid = r.get("id_area")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_area_distribusi (id_area, nama_area, keterangan) VALUES (?, ?, ?) ON CONFLICT(id_area) DO UPDATE SET nama_area=excluded.nama_area, keterangan=excluded.keterangan",
+                    (uid, r.get("nama_area"), r.get("keterangan"))
+                )
+
+        # H. tb_jadwal_distribusi
+        for r in await asyncio.to_thread(get_data_table, "tb_jadwal_distribusi"):
+            uid = r.get("id_jadwal")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_jadwal_distribusi (id_jadwal, id_cabang, id_area, hari) VALUES (?, ?, ?, ?) ON CONFLICT(id_jadwal) DO UPDATE SET id_cabang=excluded.id_cabang, id_area=excluded.id_area, hari=excluded.hari",
+                    (uid, r.get("id_cabang"), r.get("id_area"), r.get("hari"))
+                )
+
+        # I. tb_cabang
+        for r in await asyncio.to_thread(get_data_table, "tb_cabang"):
+            uid = r.get("id_cabang")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_cabang (id_cabang, nama_cabang, alamat) VALUES (?, ?, ?) ON CONFLICT(id_cabang) DO UPDATE SET nama_cabang=excluded.nama_cabang, alamat=excluded.alamat",
+                    (uid, r.get("nama_cabang"), r.get("alamat"))
+                )
+
+        # J. tb_payroll
+        for r in await asyncio.to_thread(get_data_table, "tb_payroll"):
+            uid = r.get("id_payroll")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_payroll (id_payroll, id_karyawan, periode, total_gaji, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id_payroll) DO UPDATE SET id_karyawan=excluded.id_karyawan, periode=excluded.periode, total_gaji=excluded.total_gaji, status=excluded.status",
+                    (uid, r.get("id_karyawan"), r.get("periode"), float(r.get("total_gaji") or 0), r.get("status"))
+                )
+
+        # K. tb_absensi
+        for r in await asyncio.to_thread(get_data_table, "tb_absensi"):
+            uid = r.get("id_absen") or r.get("id_presensi")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    """INSERT INTO tb_absensi (id_absen, id_karyawan, tanggal, jam_masuk, jam_keluar, koordinat, status_radius, dapat_kerja_pagi, dapat_uang_makan, catatan_koreksi) 
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                       ON CONFLICT(id_absen) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jam_masuk=excluded.jam_masuk, jam_keluar=excluded.jam_keluar, koordinat=excluded.koordinat, status_radius=excluded.status_radius, dapat_kerja_pagi=excluded.dapat_kerja_pagi, dapat_uang_makan=excluded.dapat_uang_makan, catatan_koreksi=excluded.catatan_koreksi""",
+                    (str(uid), r.get("id_karyawan"), r.get("tanggal"), r.get("jam_masuk"), r.get("jam_keluar"), r.get("koordinat"), r.get("status_radius"), r.get("dapat_kerja_pagi"), r.get("dapat_uang_makan"), r.get("catatan_koreksi"))
+                )
+
+        # L. tb_kasbon
+        for r in await asyncio.to_thread(get_data_table, "tb_kasbon"):
+            uid = r.get("id_kasbon")
+            if uid:
+                await asyncio.to_thread(client.execute,
+                    "INSERT INTO tb_kasbon (id_kasbon, id_karyawan, tanggal, jumlah, keterangan, status) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id_kasbon) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jumlah=excluded.jumlah, keterangan=excluded.keterangan, status=excluded.status",
+                    (uid, r.get("id_karyawan"), r.get("tanggal"), float(r.get("jumlah") or 0), r.get("keterangan"), r.get("status"))
+                )
+
+        return {"status": "success", "message": "Seluruh data dari Google Sheets berhasil disinkronkan ke Turso Cloud!"}
+    
     except Exception as e:
         import traceback
-        err_msg = traceback.format_exc()
-        print("DETAIL SYNC ERROR:", err_msg)
-        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi: {str(e)}")
+        print("DETAIL SYNC ERROR:", traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi massal: {str(e)}")
 
 @app.post("/api/sync/turso-to-sheets")
 def sync_turso_to_sheets():
     try:
-        # Logika untuk mengambil data dari Turso lalu memperbarui Google Sheets via gspread
-        # (Dapat disesuaikan dengan kebutuhan tabel rekap Anda)
         return {"status": "success", "message": "Berhasil mengekspor data Turso ke Google Sheets!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -138,13 +235,10 @@ SCOPES = [
 ]
 SPREADSHEET_ID = "1FbPrmPU7yslM9nHpzx0mEAMLO4_-MM7V-FPJespPyF4"
 
-
 def get_gspread_client():
     creds = None
     if os.path.exists("credentials.json"):
-        creds = Credentials.from_service_account_file(
-            "credentials.json", scopes=SCOPES
-        )
+        creds = Credentials.from_service_account_file("credentials.json", scopes=SCOPES)
     elif "credentials" in os.environ:
         creds_dict = json.loads(os.environ["credentials"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
@@ -152,12 +246,8 @@ def get_gspread_client():
         creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS"])
         creds = Credentials.from_service_account_info(creds_dict, scopes=SCOPES)
     else:
-        raise HTTPException(
-            status_code=500,
-            detail="Kredensial Google Sheets tidak ditemukan!",
-        )
+        raise HTTPException(status_code=500, detail="Kredensial Google Sheets tidak ditemukan!")
     return gspread.authorize(creds)
-
 
 def get_sheet(sheet_name: str):
     try:
@@ -168,10 +258,7 @@ def get_sheet(sheet_name: str):
         except Exception:
             return spreadsheet.get_worksheet(0)
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Gagal koneksi Google Sheets: {str(e)}"
-        )
-
+        raise HTTPException(status_code=500, detail=f"Gagal koneksi Google Sheets: {str(e)}")
 
 # ==========================================
 # 2. HELPER UTILITAS DATA & TANGGAL
@@ -190,7 +277,6 @@ def clean_date_str(val: Any) -> str:
         return s_val[:10]
     return s_val.split("T")[0]
 
-
 def clean_time_str(val: Any) -> str:
     if not val:
         return ""
@@ -202,7 +288,6 @@ def clean_time_str(val: Any) -> str:
                 return p[:5]
     return s_val[:5]
 
-
 def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     R = 6371000.0
     rad = math.pi / 180.0
@@ -211,7 +296,6 @@ def calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> fl
     a = math.sin(d_lat / 2.0) ** 2 + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin(d_lon / 2.0) ** 2
     c = 2.0 * math.atan2(math.sqrt(a), math.sqrt(1.0 - a))
     return R * c
-
 
 def get_nama_hari_indo(dt: datetime) -> str:
     hari_arr = ["Minggu", "Senin", "Selasa", "Rabu", "Kamis", "Jumat", "Sabtu"]
@@ -269,7 +353,6 @@ def get_data_table(sheet_name: str) -> List[Dict[str, Any]]:
             result.append(obj)
 
     return result
-
 
 def is_karyawan_libur(
     emp: Dict[str, Any],
@@ -366,13 +449,11 @@ def login_user(payload: LoginPayload):
     except Exception as err:
         return {"status": "error", "message": f"Error Login: {str(err)}"}
 
-
 class PresensiProcessPayload(BaseModel):
     id_karyawan: str
     lat_user: float
     long_user: float
     jenis: str  # 'IN' / 'OUT'
-
 
 class InsentifKhususPayload(BaseModel):
     id_cabang: Optional[str] = "Semua"
@@ -382,7 +463,6 @@ class InsentifKhususPayload(BaseModel):
     potonganTerlambat: Optional[float] = 0
     bonusFull7Hari: Optional[float] = 0
 
-
 class RuleUmumCabangPayload(BaseModel):
     id_cabang: Optional[str] = "Semua"
     jamOvertime: Optional[str] = "17:30"
@@ -390,12 +470,10 @@ class RuleUmumCabangPayload(BaseModel):
     nominalKerjaPagi: Optional[float] = 10000
     nominalUangMakan: Optional[float] = 15000
 
-
 class AreaDistribusiPayload(BaseModel):
     nama_area: str
     id_cabang: str
     nopol_default: Optional[str] = ""
-
 
 class PenugasanJadwalItem(BaseModel):
     tanggal: str
@@ -406,12 +484,10 @@ class PenugasanJadwalItem(BaseModel):
     nopol_armada: Optional[str] = ""
     keterangan: Optional[str] = ""
 
-
 class MingguanJadwalPayload(BaseModel):
     id_cabang: str
     id_foreman: Optional[str] = ""
     daftar_penugasan: List[PenugasanJadwalItem]
-
 
 class UpdateJadwalPayload(BaseModel):
     id_jadwal: str
@@ -1576,293 +1652,3 @@ def sync_from_sheets():
         "status": "success",
         "message": "Webhook sinkronisasi dari Google Sheets diterima.",
     }
-
-# ==========================================
-# inisialisasi seluruh tabel di Turso serta endpoint sinkronisasi massal (bulk insert)
-# ==========================================
-
-# --- KONEKSI DATABASE TURSO / SQLITE ---
-def get_turso_connection():
-    # Sesuaikan jalur database Turso / SQLite Anda
-    conn = sqlite3.connect("turso_database.db")
-    conn.row_factory = sqlite3.Row
-    return conn
-
-# --- 1. INISIALISASI SELURUH TABEL DI TURSO ---
-@app.on_event("startup")
-def setup_turso_database():
-    conn = get_turso_connection()
-    cursor = conn.cursor()
-
-    # Tabel Pengaturan Umum
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_pengaturan (
-            key TEXT PRIMARY KEY,
-            value TEXT
-        )
-    """)
-
-    # Tabel Pengaturan Gaji
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_pengaturan_gaji (
-            id TEXT PRIMARY KEY,
-            keterangan TEXT,
-            nominal REAL
-        )
-    """)
-
-    # Tabel Karyawan
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_karyawan (
-            id_karyawan TEXT PRIMARY KEY,
-            nama_lengkap TEXT,
-            jabatan TEXT,
-            id_cabang TEXT,
-            email TEXT,
-            role TEXT,
-            username TEXT,
-            password TEXT,
-            status TEXT,
-            gaji_harian REAL,
-            hari_libur_rutin TEXT
-        )
-    """)
-
-    # Tabel Libur
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_libur (
-            id_libur TEXT PRIMARY KEY,
-            tanggal TEXT,
-            keterangan TEXT
-        )
-    """)
-
-    # Tabel Tukar Libur
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_tukar_libur (
-            id_tukar TEXT PRIMARY KEY,
-            id_karyawan TEXT,
-            tanggal_asal TEXT,
-            tanggal_tujuan TEXT,
-            status TEXT
-        )
-    """)
-
-    # Tabel Izin
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_izin (
-            id_izin TEXT PRIMARY KEY,
-            id_karyawan TEXT,
-            tanggal TEXT,
-            jenis_izin TEXT,
-            keterangan TEXT,
-            status TEXT
-        )
-    """)
-
-    # Tabel Area Distribusi
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_area_distribusi (
-            id_area TEXT PRIMARY KEY,
-            nama_area TEXT,
-            keterangan TEXT
-        )
-    """)
-
-    # Tabel Jadwal Distribusi
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_jadwal_distribusi (
-            id_jadwal TEXT PRIMARY KEY,
-            id_cabang TEXT,
-            id_area TEXT,
-            hari TEXT
-        )
-    """)
-
-    # Tabel Cabang
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_cabang (
-            id_cabang TEXT PRIMARY KEY,
-            nama_cabang TEXT,
-            alamat TEXT
-        )
-    """)
-
-    # Tabel Payroll
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_payroll (
-            id_payroll TEXT PRIMARY KEY,
-            id_karyawan TEXT,
-            periode TEXT,
-            total_gaji REAL,
-            status TEXT
-        )
-    """)
-
-    # Tabel Absensi
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_absensi (
-            id_absen TEXT PRIMARY KEY,
-            id_karyawan TEXT,
-            tanggal TEXT,
-            jam_masuk TEXT,
-            jam_keluar TEXT,
-            koordinat TEXT,
-            status_radius TEXT,
-            dapat_kerja_pagi TEXT,
-            dapat_uang_makan TEXT,
-            catatan_koreksi TEXT
-        )
-    """)
-
-    # Tabel Kasbon
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS tb_kasbon (
-            id_kasbon TEXT PRIMARY KEY,
-            id_karyawan TEXT,
-            tanggal TEXT,
-            jumlah REAL,
-            keterangan TEXT,
-            status TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-    print("Semua tabel Turso berhasil diinisialisasi!")
-
-
-# --- 2. ENDPOINT SINKRONISASI (GOOGLE SHEETS KE TURSO) ---
-@app.post("/api/sync/sheets-to-turso")
-def sync_sheets_to_turso():
-    try:
-        conn = get_turso_connection()
-        cursor = conn.cursor()
-
-        # A. Sinkronisasi tb_pengaturan
-        for r in get_data_table("tb_pengaturan"):
-            if r.get("key"):
-                cursor.execute("""
-                    INSERT INTO tb_pengaturan (key, value) VALUES (?, ?)
-                    ON CONFLICT(key) DO UPDATE SET value=excluded.value
-                """, (r.get("key"), r.get("value")))
-
-        # B. Sinkronisasi tb_pengaturan_gaji
-        for r in get_data_table("tb_pengaturan_gaji"):
-            if r.get("id") or r.get("id_pengaturan"):
-                uid = r.get("id") or r.get("id_pengaturan")
-                cursor.execute("""
-                    INSERT INTO tb_pengaturan_gaji (id, keterangan, nominal) VALUES (?, ?, ?)
-                    ON CONFLICT(id) DO UPDATE SET keterangan=excluded.keterangan, nominal=excluded.nominal
-                """, (uid, r.get("keterangan"), r.get("nominal")))
-
-        # C. Sinkronisasi tb_karyawan
-        for r in get_data_table("tb_karyawan"):
-            if r.get("id_karyawan"):
-                cursor.execute("""
-                    INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id_karyawan) DO UPDATE SET
-                        nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang,
-                        email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password,
-                        status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin
-                """, (
-                    r.get("id_karyawan"), r.get("nama_lengkap"), r.get("jabatan"), r.get("id_cabang"),
-                    r.get("email"), r.get("role"), r.get("username"), r.get("password"),
-                    r.get("status"), r.get("gaji_harian"), r.get("hari_libur_rutin")
-                ))
-
-        # D. Sinkronisasi tb_libur
-        for r in get_data_table("tb_libur"):
-            uid = r.get("id_libur") or r.get("tanggal")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_libur (id_libur, tanggal, keterangan) VALUES (?, ?, ?)
-                    ON CONFLICT(id_libur) DO UPDATE SET tanggal=excluded.tanggal, keterangan=excluded.keterangan
-                """, (str(uid), r.get("tanggal"), r.get("keterangan")))
-
-        # E. Sinkronisasi tb_tukar_libur
-        for r in get_data_table("tb_tukar_libur"):
-            uid = r.get("id_tukar")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_tukar_libur (id_tukar, id_karyawan, tanggal_asal, tanggal_tujuan, status) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(id_tukar) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal_asal=excluded.tanggal_asal, tanggal_tujuan=excluded.tanggal_tujuan, status=excluded.status
-                """, (uid, r.get("id_karyawan"), r.get("tanggal_asal"), r.get("tanggal_tujuan"), r.get("status")))
-
-        # F. Sinkronisasi tb_izin
-        for r in get_data_table("tb_izin"):
-            uid = r.get("id_izin")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_izin (id_izin, id_karyawan, tanggal, jenis_izin, keterangan, status) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id_izin) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jenis_izin=excluded.jenis_izin, keterangan=excluded.keterangan, status=excluded.status
-                """, (uid, r.get("id_karyawan"), r.get("tanggal"), r.get("jenis_izin"), r.get("keterangan"), r.get("status")))
-
-        # G. Sinkronisasi tb_area_distribusi
-        for r in get_data_table("tb_area_distribusi"):
-            uid = r.get("id_area")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_area_distribusi (id_area, nama_area, keterangan) VALUES (?, ?, ?)
-                    ON CONFLICT(id_area) DO UPDATE SET nama_area=excluded.nama_area, keterangan=excluded.keterangan
-                """, (uid, r.get("nama_area"), r.get("keterangan")))
-
-        # H. Sinkronisasi tb_jadwal_distribusi
-        for r in get_data_table("tb_jadwal_distribusi"):
-            uid = r.get("id_jadwal")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_jadwal_distribusi (id_jadwal, id_cabang, id_area, hari) VALUES (?, ?, ?, ?)
-                    ON CONFLICT(id_jadwal) DO UPDATE SET id_cabang=excluded.id_cabang, id_area=excluded.id_area, hari=excluded.hari
-                """, (uid, r.get("id_cabang"), r.get("id_area"), r.get("hari")))
-
-        # I. Sinkronisasi tb_cabang
-        for r in get_data_table("tb_cabang"):
-            uid = r.get("id_cabang")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_cabang (id_cabang, nama_cabang, alamat) VALUES (?, ?, ?)
-                    ON CONFLICT(id_cabang) DO UPDATE SET nama_cabang=excluded.nama_angcabang, alamat=excluded.alamat
-                """, (uid, r.get("nama_cabang"), r.get("alamat")))
-
-        # J. Sinkronisasi tb_payroll
-        for r in get_data_table("tb_payroll"):
-            uid = r.get("id_payroll")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_payroll (id_payroll, id_karyawan, periode, total_gaji, status) VALUES (?, ?, ?, ?, ?)
-                    ON CONFLICT(id_payroll) DO UPDATE SET id_karyawan=excluded.id_karyawan, periode=excluded.periode, total_gaji=excluded.total_gaji, status=excluded.status
-                """, (uid, r.get("id_karyawan"), r.get("periode"), r.get("total_gaji"), r.get("status")))
-
-        # K. Sinkronisasi tb_absensi
-        for r in get_data_table("tb_absensi"):
-            uid = r.get("id_absen") or r.get("id_presensi")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_absensi (id_absen, id_karyawan, tanggal, jam_masuk, jam_keluar, koordinat, status_radius, dapat_kerja_pagi, dapat_uang_makan, catatan_koreksi)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id_absen) DO UPDATE SET
-                        id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jam_masuk=excluded.jam_masuk,
-                        jam_keluar=excluded.jam_keluar, koordinat=excluded.koordinat, status_radius=excluded.status_radius,
-                        dapat_kerja_pagi=excluded.dapat_kerja_pagi, dapat_uang_makan=excluded.dapat_uang_makan, catatan_koreksi=excluded.catatan_koreksi
-                """, (
-                    str(uid), r.get("id_karyawan"), r.get("tanggal"), r.get("jam_masuk"), r.get("jam_keluar"),
-                    r.get("koordinat"), r.get("status_radius"), r.get("dapat_kerja_pagi"), r.get("dapat_uang_makan"), r.get("catatan_koreksi")
-                ))
-
-        # L. Sinkronisasi tb_kasbon
-        for r in get_data_table("tb_kasbon"):
-            uid = r.get("id_kasbon")
-            if uid:
-                cursor.execute("""
-                    INSERT INTO tb_kasbon (id_kasbon, id_karyawan, tanggal, jumlah, keterangan, status) VALUES (?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(id_kasbon) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jumlah=excluded.jumlah, keterangan=excluded.keterangan, status=excluded.status
-                """, (uid, r.get("id_karyawan"), r.get("tanggal"), r.get("jumlah"), r.get("keterangan"), r.get("status")))
-
-        conn.commit()
-        conn.close()
-        return {"status": "success", "message": "Seluruh data dari Google Sheets berhasil disinkronkan ke Turso!"}
-    
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi massal: {str(e)}")
