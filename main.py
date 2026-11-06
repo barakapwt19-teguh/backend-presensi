@@ -429,11 +429,11 @@ class LoginPayload(BaseModel):
 
 @app.post("/api/auth/login")
 @app.post("/api/login")
-async def login_user(payload: LoginPayload): # <-- Ubah dari def menjadi async def
+def login_user(payload: LoginPayload):  # <-- Kembalikan menjadi def biasa (sync)
     try:
-        # Ambil langsung dari tabel Turso menggunakan await jika diperlukan, 
-        # atau bungkus dengan asyncio.to_thread jika fungsi sinkron:
-        list_karyawan = await asyncio.to_thread(fetch_from_turso, "SELECT * FROM tb_karyawan")
+        # Panggil langsung tanpa await dan asyncio.to_thread
+        # Karena ini def sync, FastAPI otomatis mengeksekusinya di threadpool (aman dari blocking)
+        list_karyawan = fetch_from_turso("SELECT * FROM tb_karyawan")
         
         user = None
         for k in list_karyawan:
