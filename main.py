@@ -79,66 +79,72 @@ def get_turso_client():
 
 @app.get("/api/sync/sheets-to-turso")
 @app.post("/api/sync/sheets-to-turso")
-async def sync_sheets_to_turso():
+def sync_sheets_to_turso():
     try:
-        client = get_turso_client()
+        TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+        TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
 
-        tables_definition = [
-            """CREATE TABLE IF NOT EXISTS tb_pengaturan (key TEXT PRIMARY KEY, value TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_pengaturan_gaji (id TEXT PRIMARY KEY, keterangan TEXT, nominal REAL)""",
-            """CREATE TABLE IF NOT EXISTS tb_karyawan (id_karyawan TEXT PRIMARY KEY, nama_lengkap TEXT, jabatan TEXT, id_cabang TEXT, email TEXT, role TEXT, username TEXT, password TEXT, status TEXT, gaji_harian REAL, hari_libur_rutin TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_libur (id_libur TEXT PRIMARY KEY, tanggal TEXT, keterangan TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_tukar_libur (id_tukar TEXT PRIMARY KEY, id_karyawan TEXT, tanggal_asal TEXT, tanggal_tujuan TEXT, status TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_izin (id_izin TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jenis_izin TEXT, keterangan TEXT, status TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_area_distribusi (id_area TEXT PRIMARY KEY, nama_area TEXT, keterangan TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_jadwal_distribusi (id_jadwal TEXT PRIMARY KEY, id_cabang TEXT, id_area TEXT, hari TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_cabang (id_cabang TEXT PRIMARY KEY, nama_cabang TEXT, alamat TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_payroll (id_payroll TEXT PRIMARY KEY, id_karyawan TEXT, periode TEXT, total_gaji REAL, status TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_absensi (id_absen TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jam_masuk TEXT, jam_keluar TEXT, koordinat TEXT, status_radius TEXT, dapat_kerja_pagi TEXT, dapat_uang_makan TEXT, catatan_koreksi TEXT)""",
-            """CREATE TABLE IF NOT EXISTS tb_kasbon (id_kasbon TEXT PRIMARY KEY, id_karyawan TEXT, tanggal TEXT, jumlah REAL, keterangan TEXT, status TEXT)"""
+        if not TURSO_URL or not TURSO_TOKEN:
+            raise HTTPException(status_code=500, detail="Konfigurasi Turso URL/Token belum diset di environment variables.")
+
+        rest_url = TURSO_URL.replace("libsql://", "https://") + "/v2/pipeline"
+        headers = {
+            "Authorization": f"Bearer {TURSO_TOKEN}",
+            "Content-Type": "application/json"
+        }
+
+        # 1. Buat Tabel di Turso Cloud via HTTP API
+        tables_sql = [
+            "CREATE TABLE IF NOT EXISTS tb_pengaturan (key TEXT PRIMARY KEY, value TEXT)",
+            "CREATE TABLE IF NOT EXISTS tb_karyawan (id_karyawan TEXT PRIMARY KEY, nama_lengkap TEXT, jabatan TEXT, id_cabang TEXT, email TEXT, role TEXT, username TEXT, password TEXT, status TEXT, gaji_harian REAL, hari_libur_rutin TEXT)"
         ]
 
-        for query in tables_definition:
-            await asyncio.to_thread(client.execute, query)
+        for sql in tables_sql:
+            body = {"requests": [{"type": "execute", "stmt": {"sql": sql}}, {"type": "close"}]}
+            requests.post(rest_url, headers=headers, json=body, timeout=10)
 
-        # Helper aman untuk konversi angka
-        def safe_float(val):
-            try:
-                return float(val) if val else 0.0
-            except:
-                return 0.0
-
-        # A. tb_pengaturan
-        for r in await asyncio.to_thread(get_data_table, "tb_pengaturan"):
-            if r.get("key"):
-                await asyncio.to_thread(client.execute, 
-                    "INSERT INTO tb_pengaturan (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                    (str(r.get("key")), str(r.get("value", "")))
-                )
-
-        # B. tb_karyawan (Penting untuk Login)
-        for r in await asyncio.to_thread(get_data_table, "tb_karyawan"):
+        # 2. Ambil data dari Google Sheets dan masukkan ke Turso
+        karyawan_data = get_data_table("tb_karyawan")
+        
+        statements = []
+        for r in karyawan_data:
             if r.get("id_karyawan"):
-                await asyncio.to_thread(client.execute,
-                    """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin) 
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                       ON CONFLICT(id_karyawan) DO UPDATE SET nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin""",
-                    (
-                        str(r.get("id_karyawan")), str(r.get("nama_lengkap", "")), str(r.get("jabatan", "")), 
-                        str(r.get("id_cabang", "")), str(r.get("email", "")), str(r.get("role", "")), 
-                        str(r.get("username", "")), str(r.get("password", "")), str(r.get("status", "Aktif")), 
-                        safe_float(r.get("gaji_harian")), str(r.get("hari_libur_rutin", "Minggu"))
-                    )
-                )
+                statements.append({
+                    "type": "execute",
+                    "stmt": {
+                        "sql": """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin) 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                                  ON CONFLICT(id_karyawan) DO UPDATE SET nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin""",
+                        "args": [
+                            {"type": "text", "value": str(r.get("id_karyawan"))},
+                            {"type": "text", "value": str(r.get("nama_lengkap", ""))},
+                            {"type": "text", "value": str(r.get("jabatan", ""))},
+                            {"type": "text", "value": str(r.get("id_cabang", ""))},
+                            {"type": "text", "value": str(r.get("email", ""))},
+                            {"type": "text", "value": str(r.get("role", ""))},
+                            {"type": "text", "value": str(r.get("username", ""))},
+                            {"type": "text", "value": str(r.get("password", ""))},
+                            {"type": "text", "value": str(r.get("status", "Aktif"))},
+                            {"type": "float", "value": float(r.get("gaji_harian") or 0)},
+                            {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))}
+                        ]
+                    }
+                })
 
-        # (Lanjutkan tabel lainnya dengan pola aman serupa jika diperlukan, atau fokus ke tabel utama dulu)
+        statements.append({"type": "close"})
+        
+        # Kirim batch data ke Turso Cloud
+        response = requests.post(rest_url, headers=headers, json={"requests": statements}, timeout=30)
+        
+        if response.status_code != 200:
+            raise Exception(f"Turso Error Response: {response.text}")
 
-        return {"status": "success", "message": "Tabel dan data utama berhasil disinkronkan ke Turso Cloud!"}
-    
+        return {"status": "success", "message": "Data karyawan berhasil disinkronkan langsung ke Turso Cloud!"}
+
     except Exception as e:
         import traceback
         print("DETAIL SYNC ERROR:", traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi massal: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gagal sinkronisasi: {str(e)}")
 
 @app.post("/api/sync/turso-to-sheets")
 def sync_turso_to_sheets():
