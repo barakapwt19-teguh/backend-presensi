@@ -431,7 +431,8 @@ class LoginPayload(BaseModel):
 @app.post("/api/login")
 def login_user(payload: LoginPayload):
     try:
-        list_karyawan = get_data_table("tb_karyawan")
+        # Ambil langsung dari tabel Turso
+        list_karyawan = fetch_from_turso("SELECT * FROM tb_karyawan")
         user = None
         for k in list_karyawan:
             if (
@@ -693,11 +694,12 @@ def setup_database():
 def kalkulasi_payroll_mingguan(
     tgl_awal: str, tgl_akhir: str, id_cabang: str
 ) -> List[Dict[str, Any]]:
-    list_emp = get_data_table("tb_karyawan")
-    list_absen = get_data_table("tb_absensi")
-    list_kasbon = get_data_table("tb_kasbon")
-    list_pengaturan = get_data_table("tb_pengaturan_gaji")
-    list_saved_payroll = get_data_table("tb_payroll")
+    # AMBIL DATA LANGSUNG DARI TURSO CLOUD
+    list_emp = fetch_from_turso("SELECT * FROM tb_karyawan")
+    list_absen = fetch_from_turso("SELECT * FROM tb_absensi")
+    list_kasbon = fetch_from_turso("SELECT * FROM tb_kasbon")
+    list_pengaturan = fetch_from_turso("SELECT * FROM tb_pengaturan_gaji")
+    list_saved_payroll = fetch_from_turso("SELECT * FROM tb_payroll")
 
     str_awal = clean_date_str(tgl_awal)
     str_akhir = clean_date_str(tgl_akhir)
@@ -705,22 +707,29 @@ def kalkulasi_payroll_mingguan(
     map_saved_potongan = {}
     for row_pay in list_saved_payroll:
         p_emp_id = str(row_pay.get("id_karyawan", "")).strip()
-        p_start = clean_date_str(row_pay.get("periode_mulai") or row_pay.get("tgl_mulai"))
+        p_start = clean_date_str(row_pay.get("periode_mulai") or row_pay.get("tgl_mulai") or row_pay.get("periode"))
         p_end = clean_date_str(row_pay.get("periode_selesai") or row_pay.get("tgl_selesai"))
 
-        if p_emp_id and p_start == str_awal and p_end == str_akhir:
+        if p_emp_id and (p_start == str_awal or p_start <= str_awal):
             p_pot = row_pay.get("potongan_kasbon", 0)
             map_saved_potongan[p_emp_id] = float(p_pot or 0)
 
     config_map = {
-        str(r.get("key")).strip(): str(r.get("value", "")).strip()
+        str(r.get("key") or r.get("id")).strip(): str(r.get("value") or r.get("keterangan") or "").strip()
         for r in list_pengaturan
-        if r.get("key")
+        if r.get("key") or r.get("id")
     }
 
-    min_hadir_khusus = int(config_map.get("minHadirKhusus", 5))
-    nominal_potong_terlambat = float(config_map.get("potonganTerlambat", 0))
-    bonus_full_7hari = float(config_map.get("bonusFull7Hari", 0))
+    # Jika tabel menggunakan struktur tb_pengaturan_gaji (id, keterangan, nominal)
+    for r in list_pengaturan:
+        kid = str(r.get("id") or r.get("key")).strip()
+        nom = r.get("nominal") if "nominal" in r else r.get("value")
+        if kid and nom is not None:
+            config_map[kid] = str(nom)
+
+    min_hadir_khusus = int(config_map.get("minHadirKhusus", 5) or 5)
+    nominal_potong_terlambat = float(config_map.get("potonganTerlambat", 0) or 0)
+    bonus_full_7hari = float(config_map.get("bonusFull7Hari", 0) or 0)
 
     rekap_payroll = []
     filter_cabang_norm = str(id_cabang or "").strip().lower()
@@ -788,10 +797,10 @@ def kalkulasi_payroll_mingguan(
                     if jam_masuk_clean > "08:15":
                         total_terlambat += 1
 
-                    if str(ab.get("dapat_kerja_pagi", "")).lower() == "ya":
+                    if str(ab.get("dapat_kerja_pagi", "")).lower() in ["ya", "true"]:
                         total_kerja_pagi += nominal_kerja_pagi
 
-                    if str(ab.get("dapat_uang_makan", "")).lower() == "ya":
+                    if str(ab.get("dapat_uang_makan", "")).lower() in ["ya", "true"]:
                         total_uang_makan += nominal_uang_makan
 
         raw_khusus_cabang = (
@@ -807,7 +816,7 @@ def kalkulasi_payroll_mingguan(
             or config_map.get("nominalInsentifKhusus", 0)
         )
 
-        insentif_khusus_tetap = float(emp.get("insentif_khusus", 0))
+        insentif_khusus_tetap = float(emp.get("insentif_khusus", 0) or 0)
         insentif_khusus_kondisional = 0.0
 
         if emp_id_str in list_khusus_cabang:
@@ -827,7 +836,7 @@ def kalkulasi_payroll_mingguan(
             + total_bonus_7hari
         )
 
-        gaji_harian = float(emp.get("gaji_harian", 0))
+        gaji_harian = float(emp.get("gaji_harian", 0) or 0)
         subtotal = total_hadir * gaji_harian
 
         total_sisa_kasbon_aktif = 0.0
@@ -869,6 +878,13 @@ def kalkulasi_payroll_mingguan(
 
     return rekap_payroll
 
+def fetch_from_turso(query: str, params: tuple = ()):
+    client = get_turso_client()
+    result = client.execute(query, params)
+    columns = result.columns
+    rows = result.rows
+    return [dict(zip(columns, row)) for row in rows]
+
 
 # ENDPOINT TAMBAHAN: Kalkulasi Payroll untuk dipanggil JS
 @app.get("/api/kalkulasi-payroll")
@@ -884,18 +900,19 @@ def get_kalkulasi_payroll(tgl_mulai: str, tgl_selesai: str, id_cabang: Optional[
 @app.get("/api/initial-data")
 def get_initial_data(id_karyawan: str = "", role: str = ""):
     try:
-        all_karyawan = get_data_table("tb_karyawan")
-        raw_absensi = get_data_table("tb_absensi")
-        raw_izin = get_data_table("tb_izin")
-        raw_tukar = get_data_table("tb_tukar_libur")
-        raw_libur = get_data_table("tb_libur")
-        raw_kasbon = get_data_table("tb_kasbon")
-        raw_payroll = get_data_table("tb_payroll")
-        raw_area = get_data_table("tb_area_distribusi")
-        raw_jadwal = get_data_table("tb_jadwal_distribusi")
-        settings_data = get_data_table("tb_pengaturan")
-        raw_pengaturan_gaji = get_data_table("tb_pengaturan_gaji")
-        raw_cabang = get_data_table("tb_cabang")
+        # MEMBACA LANGSUNG DARI TURSO CLOUD (Super Cepat & Bebas Error 429!)
+        all_karyawan = fetch_from_turso("SELECT * FROM tb_karyawan")
+        raw_absensi = fetch_from_turso("SELECT * FROM tb_absensi")
+        raw_izin = fetch_from_turso("SELECT * FROM tb_izin")
+        raw_tukar = fetch_from_turso("SELECT * FROM tb_tukar_libur")
+        raw_libur = fetch_from_turso("SELECT * FROM tb_libur")
+        raw_kasbon = fetch_from_turso("SELECT * FROM tb_kasbon")
+        raw_payroll = fetch_from_turso("SELECT * FROM tb_payroll")
+        raw_area = fetch_from_turso("SELECT * FROM tb_area_distribusi")
+        raw_jadwal = fetch_from_turso("SELECT * FROM tb_jadwal_distribusi")
+        settings_data = fetch_from_turso("SELECT * FROM tb_pengaturan")
+        raw_pengaturan_gaji = fetch_from_turso("SELECT * FROM tb_pengaturan_gaji")
+        raw_cabang = fetch_from_turso("SELECT * FROM tb_cabang")
 
         settings = {r["key"]: r["value"] for r in settings_data if r.get("key")}
         
@@ -947,7 +964,7 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
             }
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gagal memproses data server: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Gagal memproses data server dari Turso: {str(e)}")
 
 
 @app.post("/api/proses-presensi")
