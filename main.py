@@ -429,23 +429,59 @@ class LoginPayload(BaseModel):
 
 @app.post("/api/auth/login")
 @app.post("/api/login")
-def login_user(payload: LoginPayload):  # <-- Kembalikan menjadi def biasa (sync)
+def login_user(payload: LoginPayload):
     try:
-        # Panggil langsung tanpa await dan asyncio.to_thread
-        # Karena ini def sync, FastAPI otomatis mengeksekusinya di threadpool (aman dari blocking)
-        list_karyawan = fetch_from_turso("SELECT * FROM tb_karyawan")
-        
-        user = None
-        for k in list_karyawan:
-            if (
-                str(k.get("username", "")).strip() == payload.username.strip()
-                and str(k.get("password", "")).strip() == payload.password.strip()
-            ):
-                user = k
-                break
+        # Ambil kredensial Turso dari Environment Variable Vercel
+        TURSO_URL = os.environ.get("TURSO_DATABASE_URL")
+        TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN")
 
-        if not user:
+        if not TURSO_URL or not TURSO_TOKEN:
+            return {"status": "error", "message": "Konfigurasi Database URL/Token belum diset di server."}
+
+        # Ubah format libsql:// menjadi https:// untuk REST API Turso
+        rest_url = TURSO_URL.replace("libsql://", "https://") + "/v2/pipeline"
+
+        headers = {
+            "Authorization": f"Bearer {TURSO_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        
+        body = {
+            "requests": [
+                {
+                    "type": "execute",
+                    "stmt": {
+                        "sql": "SELECT * FROM tb_karyawan WHERE username = ? AND password = ?",
+                        "args": [
+                            {"type": "text", "value": payload.username.strip()},
+                            {"type": "text", "value": payload.password.strip()}
+                        ]
+                    }
+                },
+                {"type": "close"}
+            ]
+        }
+
+        response = requests.post(rest_url, headers=headers, json=body, timeout=10)
+        res_json = response.json()
+
+        # Ekstrak hasil dari response pipeline Turso REST API
+        rows = []
+        try:
+            resultSet = res_json["results"][0]["response"]["result"]
+            cols = [c["name"] for c in resultSet["cols"]]
+            for row in resultSet["rows"]:
+                row_dict = {}
+                for idx, val in enumerate(row):
+                    row_dict[cols[idx]] = val.get("value") if isinstance(val, dict) else val
+                rows.append(row_dict)
+        except Exception:
+            pass
+
+        if not rows:
             return {"status": "error", "message": "Username atau Password salah!"}
+
+        user = rows[0]
         if str(user.get("status")) != "Aktif":
             return {"status": "error", "message": "Akun Anda non-aktif. Hubungi HRD."}
 
@@ -463,7 +499,7 @@ def login_user(payload: LoginPayload):  # <-- Kembalikan menjadi def biasa (sync
             },
         }
     except Exception as err:
-        return {"status": "error", "message": f"Error Login: {str(err)}"}
+        return {"status": "error", "message": f"Error Login HTTP: {str(err)}"}
 
 class PresensiProcessPayload(BaseModel):
     id_karyawan: str
