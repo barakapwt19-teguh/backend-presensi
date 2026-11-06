@@ -429,10 +429,12 @@ class LoginPayload(BaseModel):
 
 @app.post("/api/auth/login")
 @app.post("/api/login")
-def login_user(payload: LoginPayload):
+async def login_user(payload: LoginPayload): # <-- Ubah dari def menjadi async def
     try:
-        # Ambil langsung dari tabel Turso
-        list_karyawan = fetch_from_turso("SELECT * FROM tb_karyawan")
+        # Ambil langsung dari tabel Turso menggunakan await jika diperlukan, 
+        # atau bungkus dengan asyncio.to_thread jika fungsi sinkron:
+        list_karyawan = await asyncio.to_thread(fetch_from_turso, "SELECT * FROM tb_karyawan")
+        
         user = None
         for k in list_karyawan:
             if (
