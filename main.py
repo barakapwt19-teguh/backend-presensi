@@ -4,6 +4,7 @@ import os
 import libsql_client
 import asyncio
 import time
+import requests
 
 from datetime import datetime, timedelta
 from pathlib import Path
