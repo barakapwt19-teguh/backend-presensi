@@ -3,6 +3,7 @@ import math
 import os
 import libsql_client
 import asyncio
+import time
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -99,7 +100,8 @@ async def sync_sheets_to_turso():
         for query in tables_definition:
             await asyncio.to_thread(client.execute, query)
 
-        # 2. Sinkronisasi Data dari Google Sheets ke Turso Cloud
+        # 2. Sinkronisasi Data dengan Jeda Waktu (Mencegah Limit 429 Google API)
+        
         # A. tb_pengaturan
         for r in await asyncio.to_thread(get_data_table, "tb_pengaturan"):
             if r.get("key"):
@@ -107,6 +109,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_pengaturan (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
                     (r.get("key"), r.get("value"))
                 )
+        time.sleep(1) # Jeda 1 detik
 
         # B. tb_pengaturan_gaji
         for r in await asyncio.to_thread(get_data_table, "tb_pengaturan_gaji"):
@@ -116,6 +119,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_pengaturan_gaji (id, keterangan, nominal) VALUES (?, ?, ?) ON CONFLICT(id) DO UPDATE SET keterangan=excluded.keterangan, nominal=excluded.nominal",
                     (uid, r.get("keterangan"), float(r.get("nominal") or 0))
                 )
+        time.sleep(1)
 
         # C. tb_karyawan
         for r in await asyncio.to_thread(get_data_table, "tb_karyawan"):
@@ -126,6 +130,7 @@ async def sync_sheets_to_turso():
                        ON CONFLICT(id_karyawan) DO UPDATE SET nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin""",
                     (r.get("id_karyawan"), r.get("nama_lengkap"), r.get("jabatan"), r.get("id_cabang"), r.get("email"), r.get("role"), r.get("username"), r.get("password"), r.get("status"), float(r.get("gaji_harian") or 0), r.get("hari_libur_rutin", "Minggu"))
                 )
+        time.sleep(1)
 
         # D. tb_libur
         for r in await asyncio.to_thread(get_data_table, "tb_libur"):
@@ -135,6 +140,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_libur (id_libur, tanggal, keterangan) VALUES (?, ?, ?) ON CONFLICT(id_libur) DO UPDATE SET tanggal=excluded.tanggal, keterangan=excluded.keterangan",
                     (str(uid), r.get("tanggal"), r.get("keterangan"))
                 )
+        time.sleep(1)
 
         # E. tb_tukar_libur
         for r in await asyncio.to_thread(get_data_table, "tb_tukar_libur"):
@@ -144,6 +150,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_tukar_libur (id_tukar, id_karyawan, tanggal_asal, tanggal_tujuan, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id_tukar) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal_asal=excluded.tanggal_asal, tanggal_tujuan=excluded.tanggal_tujuan, status=excluded.status",
                     (uid, r.get("id_karyawan"), r.get("tanggal_asal"), r.get("tanggal_tujuan"), r.get("status"))
                 )
+        time.sleep(1)
 
         # F. tb_izin
         for r in await asyncio.to_thread(get_data_table, "tb_izin"):
@@ -153,6 +160,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_izin (id_izin, id_karyawan, tanggal, jenis_izin, keterangan, status) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(id_izin) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jenis_izin=excluded.jenis_izin, keterangan=excluded.keterangan, status=excluded.status",
                     (uid, r.get("id_karyawan"), r.get("tanggal"), r.get("jenis_izin"), r.get("keterangan"), r.get("status"))
                 )
+        time.sleep(1)
 
         # G. tb_area_distribusi
         for r in await asyncio.to_thread(get_data_table, "tb_area_distribusi"):
@@ -162,6 +170,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_area_distribusi (id_area, nama_area, keterangan) VALUES (?, ?, ?) ON CONFLICT(id_area) DO UPDATE SET nama_area=excluded.nama_area, keterangan=excluded.keterangan",
                     (uid, r.get("nama_area"), r.get("keterangan"))
                 )
+        time.sleep(1)
 
         # H. tb_jadwal_distribusi
         for r in await asyncio.to_thread(get_data_table, "tb_jadwal_distribusi"):
@@ -171,6 +180,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_jadwal_distribusi (id_jadwal, id_cabang, id_area, hari) VALUES (?, ?, ?, ?) ON CONFLICT(id_jadwal) DO UPDATE SET id_cabang=excluded.id_cabang, id_area=excluded.id_area, hari=excluded.hari",
                     (uid, r.get("id_cabang"), r.get("id_area"), r.get("hari"))
                 )
+        time.sleep(1)
 
         # I. tb_cabang
         for r in await asyncio.to_thread(get_data_table, "tb_cabang"):
@@ -180,6 +190,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_cabang (id_cabang, nama_cabang, alamat) VALUES (?, ?, ?) ON CONFLICT(id_cabang) DO UPDATE SET nama_cabang=excluded.nama_cabang, alamat=excluded.alamat",
                     (uid, r.get("nama_cabang"), r.get("alamat"))
                 )
+        time.sleep(1)
 
         # J. tb_payroll
         for r in await asyncio.to_thread(get_data_table, "tb_payroll"):
@@ -189,6 +200,7 @@ async def sync_sheets_to_turso():
                     "INSERT INTO tb_payroll (id_payroll, id_karyawan, periode, total_gaji, status) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id_payroll) DO UPDATE SET id_karyawan=excluded.id_karyawan, periode=excluded.periode, total_gaji=excluded.total_gaji, status=excluded.status",
                     (uid, r.get("id_karyawan"), r.get("periode"), float(r.get("total_gaji") or 0), r.get("status"))
                 )
+        time.sleep(1)
 
         # K. tb_absensi
         for r in await asyncio.to_thread(get_data_table, "tb_absensi"):
@@ -200,6 +212,7 @@ async def sync_sheets_to_turso():
                        ON CONFLICT(id_absen) DO UPDATE SET id_karyawan=excluded.id_karyawan, tanggal=excluded.tanggal, jam_masuk=excluded.jam_masuk, jam_keluar=excluded.jam_keluar, koordinat=excluded.koordinat, status_radius=excluded.status_radius, dapat_kerja_pagi=excluded.dapat_kerja_pagi, dapat_uang_makan=excluded.dapat_uang_makan, catatan_koreksi=excluded.catatan_koreksi""",
                     (str(uid), r.get("id_karyawan"), r.get("tanggal"), r.get("jam_masuk"), r.get("jam_keluar"), r.get("koordinat"), r.get("status_radius"), r.get("dapat_kerja_pagi"), r.get("dapat_uang_makan"), r.get("catatan_koreksi"))
                 )
+        time.sleep(1)
 
         # L. tb_kasbon
         for r in await asyncio.to_thread(get_data_table, "tb_kasbon"):
