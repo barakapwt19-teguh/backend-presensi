@@ -1,10 +1,9 @@
 import json
 import math
 import os
-import libsql_client
-import asyncio
 import time
 import requests
+import asyncio
 
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -833,12 +832,57 @@ def kalkulasi_payroll_mingguan(
     return rekap_payroll
 
 def fetch_from_turso(query: str, params: tuple = ()):
-    client = get_turso_client()
-    result = client.execute(query, params)
-    columns = result.columns
-    rows = result.rows
-    return [dict(zip(columns, row)) for row in rows]
+    TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "")
+    TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
+    
+    if not TURSO_URL or not TURSO_TOKEN:
+        raise Exception("Konfigurasi Turso URL atau Auth Token belum disetel di environment variables.")
 
+    rest_url = TURSO_URL.replace("libsql://", "https://") + "/v2/pipeline"
+    
+    headers = {
+        "Authorization": f"Bearer {TURSO_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    
+    # Konversi parameter tuple ke format argumen Turso HTTP API
+    args = []
+    for p in params:
+        if isinstance(p, (int, float)):
+            args.append({"type": "float" if isinstance(p, float) else "integer", "value": p})
+        else:
+            args.append({"type": "text", "value": str(p)})
+
+    body = {
+        "requests": [
+            {
+                "type": "execute",
+                "stmt": {
+                    "sql": query,
+                    "args": args
+                }
+            },
+            {"type": "close"}
+        ]
+    }
+
+    response = requests.post(rest_url, headers=headers, json=body, timeout=15)
+    res_json = response.json()
+    
+    rows = []
+    try:
+        resultSet = res_json["results"][0]["response"]["result"]
+        cols = [c["name"] for c in resultSet["cols"]]
+        for row in resultSet["rows"]:
+            row_dict = {}
+            for idx, val in enumerate(row):
+                # Ekstrak nilai berdasarkan format JSON Turso REST API
+                row_dict[cols[idx]] = val.get("value") if isinstance(val, dict) else val
+            rows.append(row_dict)
+    except Exception as err:
+        print(f"Error parsing fetch result: {err}")
+        
+    return rows
 
 # ENDPOINT TAMBAHAN: Kalkulasi Payroll untuk dipanggil JS
 @app.get("/api/kalkulasi-payroll")
