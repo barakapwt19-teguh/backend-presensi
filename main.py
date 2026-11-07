@@ -966,13 +966,18 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
             "settings": settings,
             "allKaryawanPublic": [
                 {
-                    "id_karyawan": k.get("id_karyawan"),
-                    "nama_lengkap": k.get("nama_lengkap"),
-                    "id_cabang": k.get("id_cabang"),
-                    "posisi": k.get("jabatan") or k.get("posisi", "-"), # <-- AMBIL DARI 'jabatan'
-                    "hari_libur_rutin": k.get("hari_libur_rutin", "Minggu"),
+                    "id_karyawan": str(k.get("id_karyawan", "")),
+                    "nama_lengkap": str(k.get("nama_lengkap", "")),
+                    "id_cabang": str(k.get("id_cabang", "")),
+                    "posisi": str(k.get("jabatan") or k.get("posisi") or "-"),
+                    "jabatan": str(k.get("jabatan") or "-"),
+                    "gaji_harian": float(k.get("gaji_harian") or 0),
+                    "username": str(k.get("username", "")),
+                    "status": str(k.get("status", "Aktif")),
+                    "hari_libur_rutin": str(k.get("hari_libur_rutin", "Minggu")),
                 }
-                for k in all_karyawan if str(k.get("status", "")).strip() == "Aktif"
+                # Menggunakan pengecekan yang lebih longgar agar semua karyawan aktif / status normal pasti tampil
+                for k in all_karyawan if str(k.get("status", "Aktif")).strip().lower() not in ["non-aktif", "tidak aktif", "nonaktif", "off"]
             ],
             "cabang": raw_cabang,
             "area": raw_area,
