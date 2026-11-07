@@ -937,13 +937,13 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
             "settings": settings,
             "allKaryawanPublic": [
                 {
-                    "id_karyawan": k["id_karyawan"],
-                    "nama_lengkap": k["nama_lengkap"],
-                    "id_cabang": k["id_cabang"],
-                    "posisi": k["posisi"],
+                    "id_karyawan": k.get("id_karyawan"),
+                    "nama_lengkap": k.get("nama_lengkap"),
+                    "id_cabang": k.get("id_cabang"),
+                    "posisi": k.get("jabatan") or k.get("posisi", "-"), # <-- AMBIL DARI 'jabatan'
                     "hari_libur_rutin": k.get("hari_libur_rutin", "Minggu"),
                 }
-                for k in all_karyawan if k.get("status") == "Aktif"
+                for k in all_karyawan if str(k.get("status", "")).strip() == "Aktif"
             ],
             "cabang": raw_cabang,
             "area": raw_area,
