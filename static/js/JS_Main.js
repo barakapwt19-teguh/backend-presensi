@@ -1363,11 +1363,29 @@ function renderAllTables() {
   }
 
   // 7. KARYAWAN & CABANG
-  if (document.getElementById('tabelKaryawan') && GLOBAL_DATA.karyawan) {
+  const listKaryawanData = GLOBAL_DATA.karyawan || GLOBAL_DATA.allKaryawanPublic;
+  
+  if (document.getElementById('tabelKaryawan') && listKaryawanData) {
     let htmlK = '';
-    GLOBAL_DATA.karyawan.forEach(k => {
+    listKaryawanData.forEach(k => {
       let actionBtn = (isSuperAdmin || CURRENT_USER.role === 'Admin Cabang') ? `<button class="btn btn-sm btn-outline-primary" onclick="openEditKaryawanModal('${k.id_karyawan}')">Edit</button>` : '-';
-      htmlK += `<tr><td><b>${k.id_karyawan}</b></td><td>${k.nama_lengkap}</td><td>${k.posisi || k.jabatan}</td><td>${k.id_cabang}</td><td><span class="badge bg-warning text-dark">${k.hari_libur_rutin || 'Minggu'}</span></td><td>Rp ${Number(k.gaji_harian || 0).toLocaleString()}</td><td>${k.username || '-'}</td><td><span class="badge bg-success">${k.status}</span></td><td>${actionBtn}</td></tr>`;
+      
+      // Ambil posisi dengan fallback ke jabatan
+      let posisiText = k.posisi || k.jabatan || '-';
+      // Ambil status dengan fallback ke 'Aktif'
+      let statusText = k.status || 'Aktif';
+      
+      htmlK += `<tr>
+        <td><b>${k.id_karyawan}</b></td>
+        <td>${k.nama_lengkap || '-'}</td>
+        <td>${posisiText}</td>
+        <td>${k.id_cabang || '-'}</td>
+        <td><span class="badge bg-warning text-dark">${k.hari_libur_rutin || 'Minggu'}</span></td>
+        <td>Rp ${Number(k.gaji_harian || 0).toLocaleString('id-ID')}</td>
+        <td>${k.username || '-'}</td>
+        <td><span class="badge bg-success">${statusText}</span></td>
+        <td>${actionBtn}</td>
+      </tr>`;
     });
     document.getElementById('tabelKaryawan').innerHTML = htmlK;
   }
@@ -1376,7 +1394,7 @@ function renderAllTables() {
     let htmlC = '';
     GLOBAL_DATA.cabang.forEach(c => {
       let actionBtn = isSuperAdmin ? `<button class="btn btn-sm btn-outline-primary" onclick="openEditCabangModal('${c.id_cabang}')">Edit</button>` : '-';
-      htmlC += `<tr><td><b>${c.id_cabang}</b></td><td>${c.nama_cabang}</td><td>${c.latitude}</td><td>${c.longitude}</td><td>${c.radius_meter || c.radius} meter</td><td>${actionBtn}</td></tr>`;
+      htmlC += `<tr><td><b>${c.id_cabang}</b></td><td>${c.nama_cabang}</td><td>${c.latitude}</td><td>${c.longitude}</td><td>${c.radius_meter || c.radius || 100} meter</td><td>${actionBtn}</td></tr>`;
     });
     document.getElementById('tabelCabang').innerHTML = htmlC;
   }
