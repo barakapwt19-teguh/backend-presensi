@@ -1244,9 +1244,11 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
 @app.post("/api/proses-presensi")
 def proses_presensi(payload: PresensiProcessPayload):
     try:
+        # 1. Ambil data master dari fungsi helper/Turso
         list_karyawan = get_data_table("tb_karyawan")
         list_cabang = get_data_table("tb_cabang")
         list_izin = get_data_table("tb_izin")
+        list_absensi = get_data_table("tb_absensi") # Ambil data absensi dari Turso
 
         now = datetime.now()
         tgl_str = now.strftime("%Y-%m-%d")
@@ -1255,6 +1257,7 @@ def proses_presensi(payload: PresensiProcessPayload):
         if not emp:
             return {"status": "error", "message": "ID Karyawan tidak ditemukan!"}
 
+        # Cek Izin / Cuti
         for iz in list_izin:
             if str(iz.get("id_karyawan")) == str(payload.id_karyawan) and str(iz.get("status")) != "Ditolak":
                 t_m = clean_date_str(iz.get("tgl_mulai"))
@@ -1286,15 +1289,12 @@ def proses_presensi(payload: PresensiProcessPayload):
                     "message": f"Gagal Presensi! Anda berada di luar radius kantor ({round(jarak)}m).",
                 }
 
-        sheet = get_sheet("tb_absensi")
         jam_str = now.strftime("%H:%M:%S")
-        data_absen = sheet.get_all_values()
-
         is_late = now.hour > 8 or (now.hour == 8 and now.minute > 15)
+        
         list_badge = []
         if is_late:
             list_badge.append("Terlambat")
-
         if is_bebas_radius:
             list_badge.append(f"Bebas Radius ({emp.get('role')})")
         else:
@@ -1302,33 +1302,43 @@ def proses_presensi(payload: PresensiProcessPayload):
 
         status_fix_text = ", ".join(list_badge)
 
-        if payload.jenis == "IN":
-            for row in data_absen[1:]:
-                if (
-                    len(row) > 2
-                    and str(row[1]).strip() == str(payload.id_karyawan).strip()
-                    and clean_date_str(row[2]) == tgl_str
-                ):
-                    return {
-                        "status": "error",
-                        "message": "Anda sudah melakukan Check-in hari ini!",
-                    }
+        # Konfigurasi koneksi Turso Cloud
+        TURSO_URL = os.environ.get("TURSO_DATABASE_URL", "").replace("libsql://", "https://") + "/v2/pipeline"
+        TURSO_TOKEN = os.environ.get("TURSO_AUTH_TOKEN", "")
+        headers = {
+            "Authorization": f"Bearer {TURSO_TOKEN}",
+            "Content-Type": "application/json"
+        }
 
-            id_absen = f"ABS{str(len(data_absen)).zfill(4)}"
-            sheet.append_row(
-                [
-                    id_absen,
-                    payload.id_karyawan,
-                    tgl_str,
-                    jam_str,
-                    "",
-                    f"{payload.lat_user},{payload.long_user}",
-                    status_fix_text,
-                    "Tidak",
-                    "Tidak",
-                    "",
-                ]
-            )
+        id_absen_val = f"{payload.id_karyawan}_{tgl_str}"
+
+        if payload.jenis == "IN":
+            # Cek apakah sudah absen masuk di data lokal/Turso
+            existing_absen = next((a for a in list_absensi if str(a.get("id_karyawan")).strip() == str(payload.id_karyawan).strip() and clean_date_str(a.get("tanggal")) == tgl_str), None)
+            if existing_absen and existing_absen.get("jam_masuk"):
+                return {
+                    "status": "error",
+                    "message": "Anda sudah melakukan Check-in hari ini!",
+                }
+
+            # Insert / Update Check-in ke Turso Cloud
+            sql = """INSERT INTO tb_absensi (id_absen, id_karyawan, tanggal, jam_masuk, koordinat, status_radius, dapat_kerja_pagi, dapat_uang_makan, catatan_koreksi) 
+                     VALUES (?, ?, ?, ?, ?, ?, 'Tidak', 'Tidak', '')
+                     ON CONFLICT(id_absen) DO UPDATE SET jam_masuk=excluded.jam_masuk, koordinat=excluded.koordinat, status_radius=excluded.status_radius"""
+            
+            args = [
+                {"type": "text", "value": id_absen_val},
+                {"type": "text", "value": str(payload.id_karyawan)},
+                {"type": "text", "value": tgl_str},
+                {"type": "text", "value": jam_str},
+                {"type": "text", "value": f"{payload.lat_user},{payload.long_user}"},
+                {"type": "text", "value": status_fix_text}
+            ]
+
+            body = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
+            resp = requests.post(TURSO_URL, headers=headers, json=body, timeout=10)
+            if resp.status_code != 200:
+                raise Exception(resp.text)
 
             late_msg = "\n⚠️ Catatan: Anda dicatat TERLAMBAT (Presensi setelah jam 08.15)." if is_late else ""
             return {
@@ -1337,28 +1347,36 @@ def proses_presensi(payload: PresensiProcessPayload):
             }
 
         elif payload.jenis == "OUT":
-            for idx, row in enumerate(data_absen[1:], start=2):
-                if (
-                    len(row) > 2
-                    and str(row[1]).strip() == str(payload.id_karyawan).strip()
-                    and clean_date_str(row[2]) == tgl_str
-                ):
-                    j_out_existing = str(row[4]).strip() if len(row) > 4 else ""
-                    if j_out_existing and j_out_existing not in ["-", "23:59:59"]:
-                        return {
-                            "status": "error",
-                            "message": f"Anda sudah melakukan Check-out sebelumnya jam {j_out_existing}",
-                        }
+            existing_absen = next((a for a in list_absensi if str(a.get("id_karyawan")).strip() == str(payload.id_karyawan).strip() and clean_date_str(a.get("tanggal")) == tgl_str), None)
+            
+            if not existing_absen or not existing_absen.get("jam_masuk"):
+                return {
+                    "status": "error",
+                    "message": "Anda belum Check-in hari ini!",
+                }
 
-                    sheet.update_cell(idx, 5, jam_str)
-                    return {
-                        "status": "success",
-                        "message": f"Check-out Berhasil jam {jam_str}!",
-                    }
+            j_out_existing = str(existing_absen.get("jam_keluar", "")).strip()
+            if j_out_existing and j_out_existing not in ["-", "23:59:59", "None"]:
+                return {
+                    "status": "error",
+                    "message": f"Anda sudah melakukan Check-out sebelumnya jam {j_out_existing}",
+                }
+
+            # Update Check-out ke Turso Cloud
+            sql = "UPDATE tb_absensi SET jam_keluar = ? WHERE id_absen = ?"
+            args = [
+                {"type": "text", "value": jam_str},
+                {"type": "text", "value": id_absen_val}
+            ]
+
+            body = {"requests": [{"type": "execute", "stmt": {"sql": sql, "args": args}}, {"type": "close"}]}
+            resp = requests.post(TURSO_URL, headers=headers, json=body, timeout=10)
+            if resp.status_code != 200:
+                raise Exception(resp.text)
 
             return {
-                "status": "error",
-                "message": "Anda belum Check-in hari ini!",
+                "status": "success",
+                "message": f"Check-out Berhasil jam {jam_str}!",
             }
 
     except Exception as err:
