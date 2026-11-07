@@ -92,9 +92,10 @@ def sync_sheets_to_turso():
             "Content-Type": "application/json"
         }
 
-        # 1. Buat Seluruh Tabel Utama di Turso Cloud via HTTP API
+        # 1. Buat Seluruh Struktur 11 Tabel di Turso Cloud
         tables_sql = [
             "CREATE TABLE IF NOT EXISTS tb_pengaturan (key TEXT PRIMARY KEY, value TEXT)",
+            "CREATE TABLE IF NOT EXISTS tb_pengaturan_gaji (key TEXT PRIMARY KEY, value TEXT)",
             """CREATE TABLE IF NOT EXISTS tb_karyawan (
                 id_karyawan TEXT PRIMARY KEY, 
                 nama_lengkap TEXT, 
@@ -108,6 +109,89 @@ def sync_sheets_to_turso():
                 gaji_harian REAL, 
                 hari_libur_rutin TEXT,
                 insentif_khusus REAL
+            )""",
+            "ALTER TABLE tb_karyawan ADD COLUMN insentif_khusus REAL DEFAULT 0;",
+            """CREATE TABLE IF NOT EXISTS tb_cabang (
+                id_cabang TEXT PRIMARY KEY,
+                nama_cabang TEXT,
+                latitude REAL,
+                longitude REAL,
+                radius_meter REAL
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_area_distribusi (
+                id_area TEXT PRIMARY KEY,
+                nama_area TEXT,
+                id_cabang TEXT,
+                nopol_default TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_absensi (
+                id_absen TEXT PRIMARY KEY,
+                id_karyawan TEXT,
+                tanggal TEXT,
+                jam_masuk TEXT,
+                jam_keluar TEXT,
+                koordinat TEXT,
+                status_radius TEXT,
+                dapat_kerja_pagi TEXT,
+                dapat_uang_makan TEXT,
+                catatan_koreksi TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_izin (
+                id_izin TEXT PRIMARY KEY,
+                id_karyawan TEXT,
+                tgl_mulai TEXT,
+                tgl_selesai TEXT,
+                jenis TEXT,
+                keterangan TEXT,
+                status TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_tukar_libur (
+                id_tukar TEXT PRIMARY KEY,
+                id_pemohon TEXT,
+                tgl_pemohon TEXT,
+                id_pengganti TEXT,
+                tgl_pengganti TEXT,
+                alasan TEXT,
+                status TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_libur (
+                id_libur TEXT PRIMARY KEY,
+                id_karyawan TEXT,
+                tanggal TEXT,
+                keterangan TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_kasbon (
+                id_kasbon TEXT PRIMARY KEY,
+                id_karyawan TEXT,
+                tanggal TEXT,
+                nominal REAL,
+                bayar_cicilan REAL,
+                sisa_kasbon REAL,
+                keterangan TEXT,
+                status TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_jadwal_distribusi (
+                id_jadwal TEXT PRIMARY KEY,
+                tanggal TEXT,
+                id_cabang TEXT,
+                id_foreman TEXT,
+                id_sopir TEXT,
+                id_kenek TEXT,
+                id_gudang TEXT,
+                id_area TEXT,
+                nopol_armada TEXT,
+                keterangan TEXT
+            )""",
+            """CREATE TABLE IF NOT EXISTS tb_payroll (
+                id_payroll TEXT PRIMARY KEY,
+                id_karyawan TEXT,
+                tgl_mulai TEXT,
+                tgl_selesai TEXT,
+                total_hadir INTEGER,
+                subtotal REAL,
+                potongan_kasbon REAL,
+                lain_lain REAL,
+                total_diterima REAL
             )"""
         ]
 
@@ -115,59 +199,186 @@ def sync_sheets_to_turso():
             body = {"requests": [{"type": "execute", "stmt": {"sql": sql}}, {"type": "close"}]}
             requests.post(rest_url, headers=headers, json=body, timeout=10)
 
-        # 2. Ambil data dari Google Sheets
-        karyawan_data = get_data_table("tb_karyawan")
-        
-        if not karyawan_data:
-            return {"status": "error", "message": "Data dari Google Sheets kosong atau gagal dibaca!"}
-
         statements = []
-        for r in karyawan_data:
-            if r.get("id_karyawan"):
-                statements.append({
-                    "type": "execute",
-                    "stmt": {
-                        "sql": """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin, insentif_khusus) 
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                                  ON CONFLICT(id_karyawan) DO UPDATE SET 
-                                      nama_lengkap=excluded.nama_lengkap, 
-                                      jabatan=excluded.jabatan, 
-                                      id_cabang=excluded.id_cabang, 
-                                      email=excluded.email, 
-                                      role=excluded.role, 
-                                      username=excluded.username, 
-                                      password=excluded.password, 
-                                      status=excluded.status, 
-                                      gaji_harian=excluded.gaji_harian, 
-                                      hari_libur_rutin=excluded.hari_libur_rutin,
-                                      insentif_khusus=excluded.insentif_khusus""",
-                        "args": [
-                            {"type": "text", "value": str(r.get("id_karyawan"))},
-                            {"type": "text", "value": str(r.get("nama_lengkap", ""))},
-                            {"type": "text", "value": str(r.get("jabatan", ""))},
-                            {"type": "text", "value": str(r.get("id_cabang", ""))},
-                            {"type": "text", "value": str(r.get("email", ""))},
-                            {"type": "text", "value": str(r.get("role", ""))},
-                            {"type": "text", "value": str(r.get("username", ""))},
-                            {"type": "text", "value": str(r.get("password", ""))},
-                            {"type": "text", "value": str(r.get("status", "Aktif"))},
-                            {"type": "float", "value": float(r.get("gaji_harian") or 0)},
-                            {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))},
-                            {"type": "float", "value": float(r.get("insentif_khusus") or 0)}
-                        ]
-                    }
-                })
+
+        # Helper untuk menambah statement sync tabel secara dinamis
+        def add_sync_statements(table_name, primary_key, data_list, mapping_func):
+            data = get_data_table(table_name)
+            if data:
+                for r in data:
+                    pk_val = str(r.get(primary_key, "")).strip()
+                    if pk_val:
+                        sql, args = mapping_func(r)
+                        statements.append({
+                            "type": "execute",
+                            "stmt": {"sql": sql, "args": args}
+                        })
+
+        # 2. Sinkronisasi tb_pengaturan
+        add_sync_statements("tb_pengaturan", "key", None, lambda r: (
+            "INSERT INTO tb_pengaturan (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [{"type": "text", "value": str(r.get("key", ""))}, {"type": "text", "value": str(r.get("value", ""))}]
+        ))
+
+        # 3. Sinkronisasi tb_pengaturan_gaji
+        add_sync_statements("tb_pengaturan_gaji", "key", None, lambda r: (
+            "INSERT INTO tb_pengaturan_gaji (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+            [{"type": "text", "value": str(r.get("key", ""))}, {"type": "text", "value": str(r.get("value", ""))}]
+        ))
+
+        # 4. Sinkronisasi tb_karyawan
+        add_sync_statements("tb_karyawan", "id_karyawan", None, lambda r: (
+            """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin, insentif_khusus) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+               ON CONFLICT(id_karyawan) DO UPDATE SET 
+                   nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, 
+                   email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, 
+                   status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin, insentif_khusus=excluded.insentif_khusus""",
+            [
+                {"type": "text", "value": str(r.get("id_karyawan", ""))},
+                {"type": "text", "value": str(r.get("nama_lengkap", ""))},
+                {"type": "text", "value": str(r.get("jabatan", ""))},
+                {"type": "text", "value": str(r.get("id_cabang", ""))},
+                {"type": "text", "value": str(r.get("email", ""))},
+                {"type": "text", "value": str(r.get("role", ""))},
+                {"type": "text", "value": str(r.get("username", ""))},
+                {"type": "text", "value": str(r.get("password", ""))},
+                {"type": "text", "value": str(r.get("status", "Aktif"))},
+                {"type": "float", "value": float(r.get("gaji_harian") or 0)},
+                {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))},
+                {"type": "float", "value": float(r.get("insentif_khusus") or 0)}
+            ]
+        ))
+
+        # 5. Sinkronisasi tb_cabang
+        add_sync_statements("tb_cabang", "id_cabang", None, lambda r: (
+            """INSERT INTO tb_cabang (id_cabang, nama_cabang, latitude, longitude, radius_meter) VALUES (?, ?, ?, ?, ?) 
+               ON CONFLICT(id_cabang) DO UPDATE SET nama_cabang=excluded.nama_cabang, latitude=excluded.latitude, longitude=excluded.longitude, radius_meter=excluded.radius_meter""",
+            [
+                {"type": "text", "value": str(r.get("id_cabang", ""))},
+                {"type": "text", "value": str(r.get("nama_cabang", ""))},
+                {"type": "float", "value": float(r.get("latitude") or 0)},
+                {"type": "float", "value": float(r.get("longitude") or 0)},
+                {"type": "float", "value": float(r.get("radius_meter") or r.get("radius") or 100)}
+            ]
+        ))
+
+        # 6. Sinkronisasi tb_area_distribusi
+        add_sync_statements("tb_area_distribusi", "id_area", None, lambda r: (
+            """INSERT INTO tb_area_distribusi (id_area, nama_area, id_cabang, nopol_default) VALUES (?, ?, ?, ?) 
+               ON CONFLICT(id_area) DO UPDATE SET nama_area=excluded.nama_area, id_cabang=excluded.id_cabang, nopol_default=excluded.nopol_default""",
+            [
+                {"type": "text", "value": str(r.get("id_area", ""))},
+                {"type": "text", "value": str(r.get("nama_area", ""))},
+                {"type": "text", "value": str(r.get("id_cabang", ""))},
+                {"type": "text", "value": str(r.get("nopol_default", r.get("armada_default", "")))}
+            ]
+        ))
+
+        # 7. Sinkronisasi tb_absensi
+        add_sync_statements("tb_absensi", "id_absen", None, lambda r: (
+            """INSERT INTO tb_absensi (id_absen, id_karyawan, tanggal, jam_masuk, jam_keluar, koordinat, status_radius, dapat_kerja_pagi, dapat_uang_makan, catatan_koreksi) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id_absen) DO UPDATE SET jam_masuk=excluded.jam_masuk, jam_keluar=excluded.jam_keluar, catatan_koreksi=excluded.catatan_koreksi""",
+            [
+                {"type": "text", "value": str(r.get("id_absen", r.get("id_presensi", "")))},
+                {"type": "text", "value": str(r.get("id_karyawan", ""))},
+                {"type": "text", "value": str(r.get("tanggal", ""))},
+                {"type": "text", "value": str(r.get("jam_masuk", ""))},
+                {"type": "text", "value": str(r.get("jam_keluar", ""))},
+                {"type": "text", "value": str(r.get("koordinat", ""))},
+                {"type": "text", "value": str(r.get("status_radius", ""))},
+                {"type": "text", "value": str(r.get("dapat_kerja_pagi", "Tidak"))},
+                {"type": "text", "value": str(r.get("dapat_uang_makan", "Tidak"))},
+                {"type": "text", "value": str(r.get("catatan_koreksi", ""))}
+            ]
+        ))
+
+        # 8. Sinkronisasi tb_izin
+        add_sync_statements("tb_izin", "id_izin", None, lambda r: (
+            """INSERT INTO tb_izin (id_izin, id_karyawan, tgl_mulai, tgl_selesai, jenis, keterangan, status) VALUES (?, ?, ?, ?, ?, ?, ?) 
+               ON CONFLICT(id_izin) DO UPDATE SET status=excluded.status, keterangan=excluded.keterangan""",
+            [
+                {"type": "text", "value": str(r.get("id_izin", ""))},
+                {"type": "text", "value": str(r.get("id_karyawan", ""))},
+                {"type": "text", "value": str(r.get("tgl_mulai", ""))},
+                {"type": "text", "value": str(r.get("tgl_selesai", ""))},
+                {"type": "text", "value": str(r.get("jenis", ""))},
+                {"type": "text", "value": str(r.get("keterangan", ""))},
+                {"type": "text", "value": str(r.get("status", "Menunggu Persetujuan"))}
+            ]
+        ))
+
+        # 9. Sinkronisasi tb_tukar_libur
+        add_sync_statements("tb_tukar_libur", "id_tukar", None, lambda r: (
+            """INSERT INTO tb_tukar_libur (id_tukar, id_pemohon, tgl_pemohon, id_pengganti, tgl_pengganti, alasan, status) VALUES (?, ?, ?, ?, ?, ?, ?) 
+               ON CONFLICT(id_tukar) DO UPDATE SET status=excluded.status""",
+            [
+                {"type": "text", "value": str(r.get("id_tukar", ""))},
+                {"type": "text", "value": str(r.get("id_pemohon", ""))},
+                {"type": "text", "value": str(r.get("tgl_pemohon", ""))},
+                {"type": "text", "value": str(r.get("id_pengganti", ""))},
+                {"type": "text", "value": str(r.get("tgl_pengganti", ""))},
+                {"type": "text", "value": str(r.get("alasan", ""))},
+                {"type": "text", "value": str(r.get("status", "Menunggu Persetujuan"))}
+            ]
+        ))
+
+        # 10. Sinkronisasi tb_libur
+        add_sync_statements("tb_libur", "id_libur", None, lambda r: (
+            """INSERT INTO tb_libur (id_libur, id_karyawan, tanggal, keterangan) VALUES (?, ?, ?, ?) 
+               ON CONFLICT(id_libur) DO UPDATE SET keterangan=excluded.keterangan""",
+            [
+                {"type": "text", "value": str(r.get("id_libur", ""))},
+                {"type": "text", "value": str(r.get("id_karyawan", ""))},
+                {"type": "text", "value": str(r.get("tanggal", ""))},
+                {"type": "text", "value": str(r.get("keterangan", ""))}
+            ]
+        ))
+
+        # 11. Sinkronisasi tb_kasbon
+        add_sync_statements("tb_kasbon", "id_kasbon", None, lambda r: (
+            """INSERT INTO tb_kasbon (id_kasbon, id_karyawan, tanggal, nominal, bayar_cicilan, sisa_kasbon, keterangan, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?) 
+               ON CONFLICT(id_kasbon) DO UPDATE SET bayar_cicilan=excluded.bayar_cicilan, sisa_kasbon=excluded.sisa_kasbon, status=excluded.status""",
+            [
+                {"type": "text", "value": str(r.get("id_kasbon", ""))},
+                {"type": "text", "value": str(r.get("id_karyawan", ""))},
+                {"type": "text", "value": str(r.get("tanggal", ""))},
+                {"type": "float", "value": float(r.get("nominal") or 0)},
+                {"type": "float", "value": float(r.get("bayar_cicilan") or 0)},
+                {"type": "float", "value": float(r.get("sisa_kasbon") or 0)},
+                {"type": "text", "value": str(r.get("keterangan", ""))},
+                {"type": "text", "value": str(r.get("status", "Belum Lunas"))}
+            ]
+        ))
+
+        # 12. Sinkronisasi tb_jadwal_distribusi
+        add_sync_statements("tb_jadwal_distribusi", "id_jadwal", None, lambda r: (
+            """INSERT INTO tb_jadwal_distribusi (id_jadwal, tanggal, id_cabang, id_foreman, id_sopir, id_kenek, id_gudang, id_area, nopol_armada, keterangan) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id_jadwal) DO UPDATE SET id_sopir=excluded.id_sopir, id_kenek=excluded.id_kenek, nopol_armada=excluded.nopol_armada""",
+            [
+                {"type": "text", "value": str(r.get("id_jadwal", ""))},
+                {"type": "text", "value": str(r.get("tanggal", ""))},
+                {"type": "text", "value": str(r.get("id_cabang", ""))},
+                {"type": "text", "value": str(r.get("id_foreman", ""))},
+                {"type": "text", "value": str(r.get("id_sopir", ""))},
+                {"type": "text", "value": str(r.get("id_kenek", ""))},
+                {"type": "text", "value": str(r.get("id_gudang", ""))},
+                {"type": "text", "value": str(r.get("id_area", ""))},
+                {"type": "text", "value": str(r.get("nopol_armada", r.get("nopol", "")))},
+                {"type": "text", "value": str(r.get("keterangan", ""))}
+            ]
+        ))
 
         statements.append({"type": "close"})
         
-        # Kirim batch data ke Turso Cloud
-        response = requests.post(rest_url, headers=headers, json={"requests": statements}, timeout=30)
+        # Kirim seluruh batch data ke Turso Cloud
+        response = requests.post(rest_url, headers=headers, json={"requests": statements}, timeout=60)
         res_data = response.json()
         
         if response.status_code != 200:
             raise Exception(f"Turso Error Response: {response.text}")
 
-        return {"status": "success", "message": f"Berhasil menyinkronkan {len(karyawan_data)} data karyawan ke Turso Cloud!", "details": res_data}
+        return {"status": "success", "message": "Berhasil menyinkronkan seluruh 11 tabel database ke Turso Cloud!", "details": res_data}
 
     except Exception as e:
         import traceback
