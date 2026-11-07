@@ -52,8 +52,20 @@ async function apiFetch(endpoint, options = {}) {
     
     const response = await fetch(targetUrl, config);
     const data = await response.json();
+    
     if (!response.ok) {
-      throw new Error(data.message || data.detail || `HTTP Error ${response.status}`);
+      let rawMsg = data.message || data.detail || `HTTP Error ${response.status}`;
+      
+      // Jika pesan error dari backend berupa Array (seperti error validasi FastAPI)
+      if (Array.isArray(rawMsg)) {
+        rawMsg = rawMsg.map(err => err.msg || JSON.stringify(err)).join(', ');
+      } 
+      // Jika berupa Objek
+      else if (typeof rawMsg === 'object' && rawMsg !== null) {
+        rawMsg = JSON.stringify(rawMsg);
+      }
+      
+      throw new Error(rawMsg);
     }
     return data;
   } catch (err) {
