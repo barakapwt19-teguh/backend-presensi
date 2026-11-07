@@ -92,28 +92,55 @@ def sync_sheets_to_turso():
             "Content-Type": "application/json"
         }
 
-        # 1. Buat Tabel di Turso Cloud via HTTP API
+        # 1. Buat Seluruh Tabel Utama di Turso Cloud via HTTP API
         tables_sql = [
             "CREATE TABLE IF NOT EXISTS tb_pengaturan (key TEXT PRIMARY KEY, value TEXT)",
-            "CREATE TABLE IF NOT EXISTS tb_karyawan (id_karyawan TEXT PRIMARY KEY, nama_lengkap TEXT, jabatan TEXT, id_cabang TEXT, email TEXT, role TEXT, username TEXT, password TEXT, status TEXT, gaji_harian REAL, hari_libur_rutin TEXT)"
+            """CREATE TABLE IF NOT EXISTS tb_karyawan (
+                id_karyawan TEXT PRIMARY KEY, 
+                nama_lengkap TEXT, 
+                jabatan TEXT, 
+                id_cabang TEXT, 
+                email TEXT, 
+                role TEXT, 
+                username TEXT, 
+                password TEXT, 
+                status TEXT, 
+                gaji_harian REAL, 
+                hari_libur_rutin TEXT,
+                insentif_khusus REAL
+            )"""
         ]
 
         for sql in tables_sql:
             body = {"requests": [{"type": "execute", "stmt": {"sql": sql}}, {"type": "close"}]}
             requests.post(rest_url, headers=headers, json=body, timeout=10)
 
-        # 2. Ambil data dari Google Sheets dan masukkan ke Turso
+        # 2. Ambil data dari Google Sheets
         karyawan_data = get_data_table("tb_karyawan")
         
+        if not karyawan_data:
+            return {"status": "error", "message": "Data dari Google Sheets kosong atau gagal dibaca!"}
+
         statements = []
         for r in karyawan_data:
             if r.get("id_karyawan"):
                 statements.append({
                     "type": "execute",
                     "stmt": {
-                        "sql": """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin) 
-                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
-                                  ON CONFLICT(id_karyawan) DO UPDATE SET nama_lengkap=excluded.nama_lengkap, jabatan=excluded.jabatan, id_cabang=excluded.id_cabang, email=excluded.email, role=excluded.role, username=excluded.username, password=excluded.password, status=excluded.status, gaji_harian=excluded.gaji_harian, hari_libur_rutin=excluded.hari_libur_rutin""",
+                        "sql": """INSERT INTO tb_karyawan (id_karyawan, nama_lengkap, jabatan, id_cabang, email, role, username, password, status, gaji_harian, hari_libur_rutin, insentif_khusus) 
+                                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) 
+                                  ON CONFLICT(id_karyawan) DO UPDATE SET 
+                                      nama_lengkap=excluded.nama_lengkap, 
+                                      jabatan=excluded.jabatan, 
+                                      id_cabang=excluded.id_cabang, 
+                                      email=excluded.email, 
+                                      role=excluded.role, 
+                                      username=excluded.username, 
+                                      password=excluded.password, 
+                                      status=excluded.status, 
+                                      gaji_harian=excluded.gaji_harian, 
+                                      hari_libur_rutin=excluded.hari_libur_rutin,
+                                      insentif_khusus=excluded.insentif_khusus""",
                         "args": [
                             {"type": "text", "value": str(r.get("id_karyawan"))},
                             {"type": "text", "value": str(r.get("nama_lengkap", ""))},
@@ -125,7 +152,8 @@ def sync_sheets_to_turso():
                             {"type": "text", "value": str(r.get("password", ""))},
                             {"type": "text", "value": str(r.get("status", "Aktif"))},
                             {"type": "float", "value": float(r.get("gaji_harian") or 0)},
-                            {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))}
+                            {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))},
+                            {"type": "float", "value": float(r.get("insentif_khusus") or 0)}
                         ]
                     }
                 })
@@ -134,11 +162,12 @@ def sync_sheets_to_turso():
         
         # Kirim batch data ke Turso Cloud
         response = requests.post(rest_url, headers=headers, json={"requests": statements}, timeout=30)
+        res_data = response.json()
         
         if response.status_code != 200:
             raise Exception(f"Turso Error Response: {response.text}")
 
-        return {"status": "success", "message": "Data karyawan berhasil disinkronkan langsung ke Turso Cloud!"}
+        return {"status": "success", "message": f"Berhasil menyinkronkan {len(karyawan_data)} data karyawan ke Turso Cloud!", "details": res_data}
 
     except Exception as e:
         import traceback
