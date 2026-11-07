@@ -1241,7 +1241,7 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
         raise HTTPException(status_code=500, detail=f"Gagal memproses data server dari Turso: {str(e)}")
 
 
-@app.post("/api/proses-presensi")
+@app.post("/api/presensi/submit")
 def proses_presensi(payload: PresensiProcessPayload):
     try:
         # 1. Ambil data master dari fungsi helper/Turso
