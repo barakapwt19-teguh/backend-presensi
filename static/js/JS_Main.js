@@ -1370,36 +1370,24 @@ function renderAllTables() {
     listKaryawanData.forEach(k => {
       let actionBtn = (isSuperAdmin || CURRENT_USER.role === 'Admin Cabang') ? `<button class="btn btn-sm btn-outline-primary" onclick="openEditKaryawanModal('${k.id_karyawan}')">Edit</button>` : '-';
       
-      // Ambil posisi dengan fallback ke jabatan
       let posisiText = k.posisi || k.jabatan || '-';
-      // Ambil status dengan fallback ke 'Aktif'
       let statusText = k.status || 'Aktif';
+      let gajiHarian = Number(safe_float(k.gaji_harian || 0));
       
       htmlK += `<tr>
-        <td><b>${k.id_karyawan}</b></td>
+        <td><b>${k.id_karyawan || ''}</b></td>
         <td>${k.nama_lengkap || '-'}</td>
         <td>${posisiText}</td>
         <td>${k.id_cabang || '-'}</td>
         <td><span class="badge bg-warning text-dark">${k.hari_libur_rutin || 'Minggu'}</span></td>
-        <td>Rp ${Number(safe_float(k.gaji_harian || 0)).toLocaleString('id-ID')}</td>
+        <td>Rp ${gajiHarian.toLocaleString('id-ID')}</td>
         <td>${k.username || '-'}</td>
         <td><span class="badge bg-success">${statusText}</span></td>
         <td>${actionBtn}</td>
       </tr>`;
     });
-    document.getElementById('tabelKaryawan').innerHTML = htmlK;
+    document.getElementById('tabelKaryawan').innerHTML = htmlK || '<tr><td colspan="9" class="text-center text-muted">Tidak ada data karyawan</td></tr>';
   }
-
-  if (document.getElementById('tabelCabang') && GLOBAL_DATA.cabang) {
-    let htmlC = '';
-    GLOBAL_DATA.cabang.forEach(c => {
-      let actionBtn = isSuperAdmin ? `<button class="btn btn-sm btn-outline-primary" onclick="openEditCabangModal('${c.id_cabang}')">Edit</button>` : '-';
-      htmlC += `<tr><td><b>${c.id_cabang}</b></td><td>${c.nama_cabang}</td><td>${c.latitude}</td><td>${c.longitude}</td><td>${c.radius_meter || c.radius || 100} meter</td><td>${actionBtn}</td></tr>`;
-    });
-    document.getElementById('tabelCabang').innerHTML = htmlC;
-  }
-
-  renderTableACC();
 
   // 8. KASBON
   if (document.getElementById('tabelKasbon') && GLOBAL_DATA.kasbon) {
@@ -1409,13 +1397,31 @@ function renderAllTables() {
       let nomAwal = Number(safe_float(ks.nominal || 0));
       let totalCicilan = Number(safe_float(ks.bayar_cicilan || 0));
       let sisaKas = ks.sisa_kasbon !== undefined && ks.sisa_kasbon !== '' ? Number(safe_float(ks.sisa_kasbon)) : (nomAwal - totalCicilan);
-      htmlKas += `<tr><td><b>${ks.id_kasbon}</b></td><td>${kName}</td><td>${formatDisplayDate(ks.tanggal)}</td><td>Rp ${nomAwal.toLocaleString()}</td><td class="text-success fw-bold">Rp ${totalCicilan.toLocaleString()}</td><td class="text-danger fw-bold">Rp ${sisaKas.toLocaleString()}</td><td>${ks.keterangan || '-'}</td><td><span class="badge ${ks.status === 'Lunas' ? 'bg-success' : 'bg-warning text-dark'}">${ks.status}</span></td></tr>`;
+      
+      htmlKas += `<tr>
+        <td><b>${ks.id_kasbon || ''}</b></td>
+        <td>${kName}</td>
+        <td>${formatDisplayDate(ks.tanggal || '')}</td>
+        <td>Rp ${nomAwal.toLocaleString('id-ID')}</td>
+        <td class="text-success fw-bold">Rp ${totalCicilan.toLocaleString('id-ID')}</td>
+        <td class="text-danger fw-bold">Rp ${sisaKas.toLocaleString('id-ID')}</td>
+        <td>${ks.keterangan || '-'}</td>
+        <td><span class="badge ${ks.status === 'Lunas' ? 'bg-success' : 'bg-warning text-dark'}">${ks.status || 'Belum Lunas'}</span></td>
+      </tr>`;
     });
-    document.getElementById('tabelKasbon').innerHTML = htmlKas;
+    document.getElementById('tabelKasbon').innerHTML = htmlKas || '<tr><td colspan="8" class="text-center text-muted">Tidak ada data kasbon</td></tr>';
   }
 
   renderPermintaanTukarKaryawan();
   renderTabelJadwal();
+}
+
+function safe_float(val) {
+    if (val === null || val === undefined || val === '') return 0;
+    if (typeof val === 'number') return val;
+    let cleanVal = String(val).trim().replace(',', '.');
+    let parsed = parseFloat(cleanVal);
+    return isNaN(parsed) ? 0 : parsed;
 }
 
 /**
