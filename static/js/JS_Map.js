@@ -193,11 +193,9 @@ async function kirimPresensi(jenis) {
 
   const payload = {
     id_karyawan: CURRENT_USER.id_karyawan,
-    id_cabang: CURRENT_USER.id_cabang,
-    tipe: jenis,
-    latitude: CURRENT_LAT,
-    longitude: CURRENT_LONG,
-    status_radius: IS_WITHIN_RADIUS ? 'Dalam Radius' : (isBebasRadius ? 'Mode Management' : 'Luar Radius')
+    lat_user: CURRENT_LAT,
+    long_user: CURRENT_LONG,
+    jenis: jenis // 'IN' atau 'OUT'
   };
 
   try {
