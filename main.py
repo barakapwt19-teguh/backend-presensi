@@ -65,6 +65,19 @@ async def get_modals():
         return FileResponse(modals_path)
     return Response(status_code=404)
 
+# Helper untuk konversi aman dari string (yang mungkin pakai koma) ke float
+def safe_float(val):
+    if val is None or val == "":
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    try:
+        # Ganti koma dengan titik agar standar Python float terbaca
+        val_str = str(val).strip().replace(",", ".")
+        return float(val_str)
+    except ValueError:
+        return 0.0
+
 # ==========================================
 # KONEKSI & SINKRONISASI TURSO CLOUD
 # ==========================================
@@ -244,9 +257,9 @@ def sync_sheets_to_turso():
                 {"type": "text", "value": str(r.get("username", ""))},
                 {"type": "text", "value": str(r.get("password", ""))},
                 {"type": "text", "value": str(r.get("status", "Aktif"))},
-                {"type": "float", "value": float(r.get("gaji_harian") or 0)},
+                {"type": "float", "value": safe_float(r.get("gaji_harian"))},
                 {"type": "text", "value": str(r.get("hari_libur_rutin", "Minggu"))},
-                {"type": "float", "value": float(r.get("insentif_khusus") or 0)}
+                {"type": "float", "value": safe_float(r.get("insentif_khusus"))}
             ]
         ))
 
@@ -257,9 +270,9 @@ def sync_sheets_to_turso():
             [
                 {"type": "text", "value": str(r.get("id_cabang", ""))},
                 {"type": "text", "value": str(r.get("nama_cabang", ""))},
-                {"type": "float", "value": float(r.get("latitude") or 0)},
-                {"type": "float", "value": float(r.get("longitude") or 0)},
-                {"type": "float", "value": float(r.get("radius_meter") or r.get("radius") or 100)}
+                {"type": "float", "value": safe_float(r.get("latitude") or 0)},
+                {"type": "float", "value": safe_float(r.get("longitude") or 0)},
+                {"type": "float", "value": safe_float(r.get("radius_meter") or r.get("radius") or 100)}
             ]
         ))
 
@@ -343,9 +356,9 @@ def sync_sheets_to_turso():
                 {"type": "text", "value": str(r.get("id_kasbon", ""))},
                 {"type": "text", "value": str(r.get("id_karyawan", ""))},
                 {"type": "text", "value": str(r.get("tanggal", ""))},
-                {"type": "float", "value": float(r.get("nominal") or 0)},
-                {"type": "float", "value": float(r.get("bayar_cicilan") or 0)},
-                {"type": "float", "value": float(r.get("sisa_kasbon") or 0)},
+                {"type": "float", "value": safe_float(r.get("nominal") or 0)},
+                {"type": "float", "value": safe_float(r.get("bayar_cicilan") or 0)},
+                {"type": "float", "value": safe_float(r.get("sisa_kasbon") or 0)},
                 {"type": "text", "value": str(r.get("keterangan", ""))},
                 {"type": "text", "value": str(r.get("status", "Belum Lunas"))}
             ]
@@ -496,10 +509,10 @@ def get_data_table(sheet_name: str) -> List[Dict[str, Any]]:
                     "role": str(r[5]) if len(r) > 5 else "",
                     "username": str(r[6]) if len(r) > 6 else "",
                     "password": str(r[7]) if len(r) > 7 else "",
-                    "gaji_harian": float(r[8]) if len(r) > 8 and r[8] else 0.0,
+                    "gaji_harian": safe_float(r[8]) if len(r) > 8 and r[8] else 0.0,
                     "hari_libur_rutin": str(r[9]) if len(r) > 9 else "Minggu",
                     "status": str(r[10]) if len(r) > 10 else "Aktif",
-                    "insentif_khusus": float(r[11]) if len(r) > 11 and r[11] else 0.0,
+                    "insentif_khusus": safe_float(r[11]) if len(r) > 11 and r[11] else 0.0,
                     "tipe_insentif": str(r[12]) if len(r) > 12 and r[12] else "Harian",
                 }
             )

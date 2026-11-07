@@ -1381,7 +1381,7 @@ function renderAllTables() {
         <td>${posisiText}</td>
         <td>${k.id_cabang || '-'}</td>
         <td><span class="badge bg-warning text-dark">${k.hari_libur_rutin || 'Minggu'}</span></td>
-        <td>Rp ${Number(k.gaji_harian || 0).toLocaleString('id-ID')}</td>
+        <td>Rp ${Number(safe_float(k.gaji_harian || 0)).toLocaleString('id-ID')}</td>
         <td>${k.username || '-'}</td>
         <td><span class="badge bg-success">${statusText}</span></td>
         <td>${actionBtn}</td>
@@ -1406,9 +1406,9 @@ function renderAllTables() {
     let htmlKas = '';
     GLOBAL_DATA.kasbon.forEach(ks => {
       let kName = getEmpName(ks.id_karyawan);
-      let nomAwal = Number(ks.nominal || 0);
-      let totalCicilan = Number(ks.bayar_cicilan || 0);
-      let sisaKas = ks.sisa_kasbon !== undefined && ks.sisa_kasbon !== '' ? Number(ks.sisa_kasbon) : (nomAwal - totalCicilan);
+      let nomAwal = Number(safe_float(ks.nominal || 0));
+      let totalCicilan = Number(safe_float(ks.bayar_cicilan || 0));
+      let sisaKas = ks.sisa_kasbon !== undefined && ks.sisa_kasbon !== '' ? Number(safe_float(ks.sisa_kasbon)) : (nomAwal - totalCicilan);
       htmlKas += `<tr><td><b>${ks.id_kasbon}</b></td><td>${kName}</td><td>${formatDisplayDate(ks.tanggal)}</td><td>Rp ${nomAwal.toLocaleString()}</td><td class="text-success fw-bold">Rp ${totalCicilan.toLocaleString()}</td><td class="text-danger fw-bold">Rp ${sisaKas.toLocaleString()}</td><td>${ks.keterangan || '-'}</td><td><span class="badge ${ks.status === 'Lunas' ? 'bg-success' : 'bg-warning text-dark'}">${ks.status}</span></td></tr>`;
     });
     document.getElementById('tabelKasbon').innerHTML = htmlKas;
