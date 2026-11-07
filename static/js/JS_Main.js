@@ -157,6 +157,57 @@ async function runDatabaseSetup() {
   }
 }
 
+document.addEventListener("DOMContentLoaded", () => {
+  // Flag penanda agar data tidak di-fetch berulang-ulang kali jika tab diklik lagi
+  window.LAZY_LOADED = {
+    karyawan: false,
+    kasbon: false,
+    absensi_admin: false,
+    jadwal: false,
+    izin_tukar: false
+  };
+
+  // Helper untuk mendengarkan perpindahan tab Bootstrap
+  const setupLazyTab = (selector, tabName, renderFunction) => {
+    const tabEl = document.querySelector(selector);
+    if (tabEl) {
+      tabEl.addEventListener('shown.bs.tab', async () => {
+        if (!window.LAZY_LOADED[tabName]) {
+          try {
+            // Tampilkan indikator loading kecil jika perlu
+            const res = await apiFetch(`/api/app/lazy-data?tab=${tabName}`);
+            if (res && res.status === 'success') {
+              // Masukkan data ke dalam GLOBAL_DATA
+              Object.assign(GLOBAL_DATA, res);
+              window.LAZY_LOADED[tabName] = true;
+              
+              // Jalankan fungsi render spesifik untuk tab tersebut
+              if (typeof renderFunction === 'function') renderFunction();
+            }
+          } catch (err) {
+            console.error(`Gagal memuat data lazy [${tabName}]:`, err);
+          }
+        }
+      });
+    }
+  };
+
+  // Daftarkan tab-tab berat Anda di sini
+  // Sesuaikan selector dengan ID atau atribut href tab di HTML Anda
+  setupLazyTab('a[href="#content-karyawan"], button[data-bs-target="#content-karyawan"]', 'karyawan', () => {
+    if (typeof renderTabelKaryawanOnly === 'function') renderTabelKaryawanOnly();
+    else renderAllTables();
+  });
+
+  setupLazyTab('a[href="#content-kasbon"], button[data-bs-target="#content-kasbon"]', 'kasbon', () => {
+    renderAllTables();
+  });
+
+  setupLazyTab('a[href="#content-histori-admin"], button[data-bs-target="#content-histori-admin"]', 'absensi_admin', () => {
+    renderAllTables();
+  });
+});
+
 /**
  * ----------------------------------------------------------------------------
  * DASHBOARD & INITIAL DATA LOAD

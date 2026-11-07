@@ -78,6 +78,24 @@ def safe_float(val):
     except ValueError:
         return 0.0
 
+@app.get("/api/app/lazy-data")
+def get_lazy_data(tab: str, id_karyawan: str = None, role: str = None, id_cabang: str = "ALL"):
+    try:
+        if tab == "karyawan":
+            return {"status": "success", "karyawan": get_data_table("tb_karyawan")}
+        elif tab == "kasbon":
+            return {"status": "success", "kasbon": get_data_table("tb_kasbon")}
+        elif tab == "absensi_admin":
+            return {"status": "success", "absensi": get_data_table("tb_absensi")}
+        elif tab == "jadwal":
+            return {"status": "success", "jadwal": get_data_table("tb_jadwal_distribusi"), "area": get_data_table("tb_area_distribusi")}
+        elif tab == "izin_tukar":
+            return {"status": "success", "izin": get_data_table("tb_izin"), "tukarLibur": get_data_table("tb_tukar_libur")}
+        else:
+            raise HTTPException(status_code=400, detail="Tab tidak dikenal")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ==========================================
 # KONEKSI & SINKRONISASI TURSO CLOUD
 # ==========================================
