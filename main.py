@@ -5,7 +5,7 @@ import time
 import requests
 import asyncio
 
-from datetime import datetime, timedelta
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel
@@ -1240,6 +1240,8 @@ def get_initial_data(id_karyawan: str = "", role: str = ""):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Gagal memproses data server dari Turso: {str(e)}")
 
+# Definisikan zona waktu WIB (UTC+7)
+WIB = timezone(timedelta(hours=7))
 
 @app.post("/api/presensi/submit")
 def proses_presensi(payload: PresensiProcessPayload):
@@ -1250,8 +1252,9 @@ def proses_presensi(payload: PresensiProcessPayload):
         list_izin = get_data_table("tb_izin")
         list_absensi = get_data_table("tb_absensi") # Ambil data absensi dari Turso
 
-        now = datetime.now()
+        now = datetime.now(WIB)
         tgl_str = now.strftime("%Y-%m-%d")
+        jam_str = now.strftime("%H:%M:%S")
 
         emp = next((k for k in list_karyawan if str(k.get("id_karyawan")).strip() == str(payload.id_karyawan).strip()), None)
         if not emp:
