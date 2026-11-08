@@ -192,10 +192,10 @@ async function kirimPresensi(jenis) {
   if (btnOut) btnOut.disabled = true;
 
   const payload = {
-    id_karyawan: CURRENT_USER.id_karyawan,
-    lat_user: CURRENT_LAT,
-    long_user: CURRENT_LONG,
-    jenis: jenis // 'IN' atau 'OUT'
+    id_karyawan: String(CURRENT_USER.id_karyawan),
+    lat_user: parseFloat(CURRENT_LAT),
+    long_user: parseFloat(CURRENT_LONG),
+    jenis: String(jenis)
   };
 
   try {

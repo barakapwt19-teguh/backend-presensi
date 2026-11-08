@@ -33,7 +33,6 @@ async function apiFetch(endpoint, options = {}) {
     'Accept': 'application/json'
   };
 
-  // Tambahkan Token Auth jika ada di session
   if (CURRENT_USER && CURRENT_USER.token) {
     defaultHeaders['Authorization'] = `Bearer ${CURRENT_USER.token}`;
   }
@@ -54,18 +53,17 @@ async function apiFetch(endpoint, options = {}) {
     const data = await response.json();
     
     if (!response.ok) {
-      let rawMsg = data.message || data.detail || `HTTP Error ${response.status}`;
+      // Ambil pesan dari message atau detail
+      let errDetail = data.message || data.detail || `HTTP Error ${response.status}`;
       
-      // Jika pesan error dari backend berupa Array (seperti error validasi FastAPI)
-      if (Array.isArray(rawMsg)) {
-        rawMsg = rawMsg.map(err => err.msg || JSON.stringify(err)).join(', ');
-      } 
-      // Jika berupa Objek
-      else if (typeof rawMsg === 'object' && rawMsg !== null) {
-        rawMsg = JSON.stringify(rawMsg);
+      // JIKA dari FastAPI berupa Array (Error Validasi Pydantic)
+      if (Array.isArray(errDetail)) {
+        errDetail = errDetail.map(e => `${e.loc ? e.loc.join('.') + ': ' : ''}${e.msg}`).join(', ');
+      } else if (typeof errDetail === 'object' && errDetail !== null) {
+        errDetail = JSON.stringify(errDetail);
       }
       
-      throw new Error(rawMsg);
+      throw new Error(errDetail);
     }
     return data;
   } catch (err) {
